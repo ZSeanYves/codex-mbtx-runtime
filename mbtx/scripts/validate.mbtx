@@ -1,37 +1,126 @@
+///|
 import {
   "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
   "moonbitlang/async@0.21.3/shell",
 }
 
-///| Run from the repository root. This entry never calls a model or relay.
+///|
+async fn run_step(
+  label : String,
+  command : @shell.Cmd,
+  hint? : String = "",
+) -> Unit {
+  println("[validate] \{label}")
+  command.run() catch {
+    error => fail("[validate] \{label} failed: \{error}\n\{hint}")
+  }
+}
+
+///|
+/// Run from the repository root. This entry never calls a model or relay.
 async fn main {
-  @shell.Cmd("moon", [
-    "build", "--frozen", "--target", "wasm",
-    "--target-dir", "_build/mbtx-capabilities",
-    "mbtx/fixtures/capabilities.mbtx",
-  ]).run()
+  guard @fs.exists("codex-rs/Cargo.toml") && @fs.exists("justfile") else {
+    fail("Run moon run mbtx/scripts/validate.mbtx from the repository root.")
+  }
+  for
+    (program, args, hint) in [
+      (
+        "moon",
+        ["version"],
+        "Install the official MoonBit toolchain and add its bin directory to PATH.",
+      ),
+      (
+        "moonrun",
+        ["--version"],
+        "Install the official MoonBit toolchain and add its bin directory to PATH.",
+      ),
+      (
+        "cargo",
+        ["--version"],
+        "Install the repository's Rust toolchain and source $HOME/.cargo/env.",
+      ),
+      (
+        "just",
+        ["--version"],
+        "Install with: cargo install --locked just. Add $HOME/.cargo/bin to PATH.",
+      ),
+      (
+        "cargo",
+        ["nextest", "--version"],
+        "Install with: cargo install --locked cargo-nextest. Add $HOME/.cargo/bin to PATH.",
+      ),
+      (
+        "python3",
+        ["--version"],
+        "The workspace justfile requires Python 3. Install python3 and add it to PATH.",
+      ),
+    ] {
+    let command_name = program + " " + args.join(" ")
+    run_step(
+      "preflight: \{command_name}",
+      @shell.Cmd(program, args, cwd="codex-rs"),
+      hint~,
+    )
+  }
+  run_step(
+    "fixture: moon build",
+    @shell.Cmd("moon", [
+      "build", "--frozen", "--target", "wasm", "--target-dir", "_build/mbtx-capabilities",
+      "mbtx/fixtures/capabilities.mbtx",
+    ]),
+    hint="Prepare dependencies once with: moon build --target wasm --target-dir _build/mbtx-capabilities mbtx/fixtures/capabilities.mbtx",
+  )
   let build_env : Map[String, String] = {
     "CARGO_PROFILE_DEV_DEBUG": "0",
     "CARGO_PROFILE_TEST_DEBUG": "0",
     "CARGO_INCREMENTAL": "0",
     "CARGO_BUILD_JOBS": "4",
   }
-  @shell.Cmd("cargo", [
-    "build", "--locked", "-p", "codex-cli", "--bin", "codex", "-j", "4",
-  ], cwd="codex-rs", env=build_env).run()
-  @shell.Cmd("just", [
-    "test", "-p", "codex-config", "-p", "codex-tools",
-    "-p", "codex-mbtx-extension", "--lib",
-    "--test-threads=4", "--retries=0",
-  ], cwd="codex-rs", env=build_env).run()
-  @shell.Cmd("just", [
-    "test", "-p", "codex-core", "--lib", "-E",
-    "test(exec::) | test(exec_env::) | test(exec_policy::) | test(config::) | test(tools::parallel::) | test(tasks::) | test(tools::handlers::extension_tools::)",
-    "--test-threads=4", "--retries=0",
-  ], cwd="codex-rs", env=build_env).run()
-  @shell.Cmd("just", [
-    "test", "-p", "codex-core", "--test", "all",
-    "-E", "test(suite::mbtx::)", "--run-ignored", "all", "--test-threads=1", "--retries=0",
-  ], cwd="codex-rs", env=build_env).run()
+  run_step(
+    "CLI: cargo build",
+    @shell.Cmd(
+      "cargo",
+      ["build", "--locked", "-p", "codex-cli", "--bin", "codex", "-j", "4"],
+      cwd="codex-rs",
+      env=build_env,
+    ),
+  )
+  run_step(
+    "configuration and extension tests: just test",
+    @shell.Cmd(
+      "just",
+      [
+        "test", "-p", "codex-config", "-p", "codex-tools", "-p", "codex-mbtx-extension",
+        "--lib", "--test-threads=4", "--retries=0",
+      ],
+      cwd="codex-rs",
+      env=build_env,
+    ),
+  )
+  run_step(
+    "core tests: just test",
+    @shell.Cmd(
+      "just",
+      [
+        "test", "-p", "codex-core", "--lib", "-E", "test(exec::) | test(exec_env::) | test(exec_policy::) | test(config::) | test(tools::parallel::) | test(tasks::) | test(tools::handlers::extension_tools::)",
+        "--test-threads=4", "--retries=0",
+      ],
+      cwd="codex-rs",
+      env=build_env,
+    ),
+  )
+  run_step(
+    "offline MBTX integration tests: just test",
+    @shell.Cmd(
+      "just",
+      [
+        "test", "-p", "codex-core", "--test", "all", "-E", "test(suite::mbtx::)",
+        "--run-ignored", "all", "--test-threads=1", "--retries=0",
+      ],
+      cwd="codex-rs",
+      env=build_env,
+    ),
+  )
   println("Stage-one validation completed. No research benefit is inferred.")
 }

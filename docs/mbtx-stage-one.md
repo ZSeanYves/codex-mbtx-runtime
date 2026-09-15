@@ -53,9 +53,21 @@ benchmark. The resulting binary reported `codex-cli 0.0.0`.
 
 ## Configuration and execution
 
-Install the official MoonBit toolchain and the repository's Rust toolchain;
-ensure `moon`, `moonrun`, `cargo`, `just`, and `cargo-nextest` are on PATH. Prepare
-the fixture's dependencies once, from the repository root:
+Install the official MoonBit toolchain, the repository's Rust toolchain and
+Python 3 (required by the workspace justfile). Ensure `moon`, `moonrun`, `cargo`,
+`just`, `cargo-nextest`, and `python3` are on PATH. Install the test helpers once,
+as described in the upstream [build instructions](install.md):
+
+```console
+source "$HOME/.cargo/env"
+cargo install --locked just
+cargo install --locked cargo-nextest
+just --version
+cargo nextest --version
+python3 --version
+```
+
+Prepare the fixture's dependencies once, from the repository root:
 
 ```console
 moon build --target wasm --target-dir _build/mbtx-capabilities mbtx/fixtures/capabilities.mbtx
@@ -183,7 +195,13 @@ From the repository root, after dependency preparation:
 moon run mbtx/scripts/validate.mbtx
 ```
 
-The entry builds the actual CLI, runs the configuration, shared tool and MBTX
+The entry checks the working directory and required commands before starting
+any build. Each stage prints its command name; failures preserve the original
+error and include setup guidance where applicable. After a prerequisite is
+installed, rerun the same entry: it retains the existing Cargo and MoonBit build
+directories and does not force a clean rebuild.
+
+The entry then builds the actual CLI, runs the configuration, shared tool and MBTX
 unit suites plus the affected core configuration, exec, policy, dispatch and
 extension-adapter tests, then executes the opt-in MBTX fixed-SSE integration
 tests sequentially. It needs no
