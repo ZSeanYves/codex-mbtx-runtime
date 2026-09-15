@@ -905,11 +905,22 @@ impl Session {
             .cancel_git_enrichment_task();
         let session_task = task.task;
 
+        // Extension-owned processes may need to finish TERM/KILL, wait and drain
+        // before this outer task is aborted. Default tools retain the old bound.
+        let interruption_timeout = task
+            .turn_context
+            .extension_data
+            .get::<crate::tools::parallel::ToolCancellationGrace>()
+            .map(|grace| Duration::from_millis(grace.0.load(std::sync::atomic::Ordering::Relaxed)))
+            .unwrap_or_default()
+            .max(Duration::from_millis(GRACEFULL_INTERRUPTION_TIMEOUT_MS))
+            .min(Duration::from_secs(10));
+
         select! {
             _ = task.done.notified() => {
             },
-            _ = tokio::time::sleep(Duration::from_millis(GRACEFULL_INTERRUPTION_TIMEOUT_MS)) => {
-                warn!("task {sub_id} didn't complete gracefully after {}ms", GRACEFULL_INTERRUPTION_TIMEOUT_MS);
+            _ = tokio::time::sleep(interruption_timeout) => {
+                warn!("task {sub_id} didn't complete gracefully after {}ms", interruption_timeout.as_millis());
             }
         }
 

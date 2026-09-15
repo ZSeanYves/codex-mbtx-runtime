@@ -58,6 +58,9 @@ use codex_utils_path_uri::PathUri;
 use codex_utils_pty::DEFAULT_OUTPUT_BYTES_CAP;
 use codex_utils_pty::process_group::kill_child_process_group;
 
+mod bounded;
+pub(crate) use bounded::execute_bounded_request;
+
 pub const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10_000;
 
 // Hardcode these since it does not seem worth including the libc crate just
@@ -121,6 +124,8 @@ pub enum ExecCapturePolicy {
     FullBufferWithExpiration,
     /// Full-buffer helpers that honor expiration and suppress unredacted sandbox diagnostics.
     SensitiveFullBuffer,
+    /// Bounded one-shot tools with observed exit status and owned process-group cleanup.
+    BoundedProcess { max_bytes: usize },
 }
 
 fn select_process_exec_tool_sandbox_type(
@@ -274,6 +279,7 @@ impl ExecCapturePolicy {
     fn retained_bytes_cap(self) -> Option<usize> {
         match self {
             Self::ShellTool => Some(EXEC_OUTPUT_MAX_BYTES),
+            Self::BoundedProcess { max_bytes } => Some(max_bytes.saturating_add(1)),
             Self::FullBuffer | Self::FullBufferWithExpiration | Self::SensitiveFullBuffer => None,
         }
     }
@@ -284,7 +290,10 @@ impl ExecCapturePolicy {
 
     fn uses_expiration(self) -> bool {
         match self {
-            Self::ShellTool | Self::FullBufferWithExpiration | Self::SensitiveFullBuffer => true,
+            Self::ShellTool
+            | Self::FullBufferWithExpiration
+            | Self::SensitiveFullBuffer
+            | Self::BoundedProcess { .. } => true,
             Self::FullBuffer => false,
         }
     }
@@ -420,6 +429,19 @@ pub(crate) async fn execute_exec_request(
     stdout_stream: Option<StdoutStream>,
     after_spawn: Option<Box<dyn FnOnce() + Send>>,
 ) -> Result<ExecToolCallOutput> {
+    let sandbox = exec_request.sandbox;
+    let capture_policy = exec_request.capture_policy;
+    let start = Instant::now();
+    let raw_output_result =
+        execute_exec_request_raw(exec_request, stdout_stream, after_spawn).await;
+    finalize_exec_result(raw_output_result, sandbox, start.elapsed(), capture_policy)
+}
+
+async fn execute_exec_request_raw(
+    exec_request: ExecRequest,
+    stdout_stream: Option<StdoutStream>,
+    after_spawn: Option<Box<dyn FnOnce() + Send>>,
+) -> Result<RawExecToolCallOutput> {
     let ExecRequest {
         command,
         cwd,
@@ -469,8 +491,7 @@ pub(crate) async fn execute_exec_request(
         arg0,
     };
 
-    let start = Instant::now();
-    let raw_output_result = get_raw_output_result(
+    get_raw_output_result(
         params,
         network_sandbox_policy,
         stdout_stream,
@@ -481,9 +502,7 @@ pub(crate) async fn execute_exec_request(
         &windows_sandbox_workspace_roots,
         windows_sandbox_filesystem_overrides.as_ref(),
     )
-    .await;
-    let duration = start.elapsed();
-    finalize_exec_result(raw_output_result, sandbox, duration, capture_policy)
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -754,6 +773,7 @@ async fn exec_windows_sandbox(
         stderr,
         aggregated_output,
         timed_out: capture.timed_out,
+        termination: None,
     })
 }
 
@@ -828,6 +848,7 @@ struct RawExecToolCallOutput {
     pub stderr: StreamOutput<Vec<u8>>,
     pub aggregated_output: StreamOutput<Vec<u8>>,
     pub timed_out: bool,
+    pub termination: Option<ExecExpirationOutcome>,
 }
 
 #[inline]
@@ -963,6 +984,9 @@ async fn consume_output(
     capture_policy: ExecCapturePolicy,
     stdout_stream: Option<StdoutStream>,
 ) -> Result<RawExecToolCallOutput> {
+    if let ExecCapturePolicy::BoundedProcess { max_bytes } = capture_policy {
+        return bounded::consume(child, expiration, max_bytes).await;
+    }
     // Both stdout and stderr were configured with `Stdio::piped()`
     // above, therefore `take()` should normally return `Some`.  If it doesn't
     // we treat it as an exceptional I/O error
@@ -1167,6 +1191,7 @@ async fn consume_output(
         stderr,
         aggregated_output,
         timed_out,
+        termination: None,
     })
 }
 

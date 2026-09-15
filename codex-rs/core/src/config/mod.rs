@@ -603,6 +603,7 @@ pub enum ThreadStoreConfig {
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
+    pub mbtx: codex_config::mbtx::MbtxConfig,
     /// Provenance for how this [`Config`] was derived (merged layers + enforced
     /// requirements).
     pub config_layer_stack: ConfigLayerStack,
@@ -4141,7 +4142,10 @@ impl Config {
         )
         .map_err(std::io::Error::from)?;
         let otel = otel::resolve_config(cfg.otel.unwrap_or_default(), &mut startup_warnings);
+        let mbtx = cfg.mbtx.clone().unwrap_or_default();
+        mbtx.validate()?;
         let config = Self {
+            mbtx,
             model,
             service_tier,
             review_model,

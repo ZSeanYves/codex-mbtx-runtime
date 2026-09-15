@@ -106,6 +106,7 @@ pub enum ToolCallSource {
 
 #[derive(Clone)]
 pub struct ToolCall<'call> {
+    pub process_executor: Option<Arc<dyn crate::ToolProcessExecutor>>,
     pub turn_id: String,
     pub call_id: String,
     pub tool_name: ToolName,

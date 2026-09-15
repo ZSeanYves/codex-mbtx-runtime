@@ -1,0 +1,7 @@
+# Replace both paths with absolute paths reported by `command -v`.
+# No provider or authentication configuration is required for fixed replay tests.
+[mbtx]
+enabled = true
+moon = "/absolute/path/to/moon"
+moonrun = "/absolute/path/to/moonrun"
+dependency_cache = "/absolute/path/to/.moon/cache/deps"

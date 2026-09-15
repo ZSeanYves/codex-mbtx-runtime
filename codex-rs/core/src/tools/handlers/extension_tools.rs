@@ -41,6 +41,10 @@ impl ExtensionToolAdapter {
 }
 
 impl ToolExecutor<ToolInvocation> for ExtensionToolAdapter {
+    fn cancellation_grace_period(&self) -> std::time::Duration {
+        self.0.cancellation_grace_period()
+    }
+
     fn tool_name(&self) -> ToolName {
         self.0.tool_name()
     }
@@ -65,7 +69,10 @@ impl ToolExecutor<ToolInvocation> for ExtensionToolAdapter {
     where
         ToolInvocation: 'a,
     {
-        Box::pin(async move { self.0.handle(to_extension_call(&invocation).await).await })
+        Box::pin(async move {
+            let invocation = Arc::new(invocation);
+            self.0.handle(to_extension_call(&invocation).await).await
+        })
     }
 }
 
@@ -163,7 +170,7 @@ impl TurnItemEmitter for CoreTurnItemEmitter {
     }
 }
 
-async fn to_extension_call(invocation: &ToolInvocation) -> ExtensionToolCall<'_> {
+async fn to_extension_call(invocation: &Arc<ToolInvocation>) -> ExtensionToolCall<'_> {
     let conversation_history =
         ConversationHistory::new(invocation.session.clone_history().await.into_raw_items());
     let settings = &invocation.step_context.settings;
@@ -200,6 +207,9 @@ async fn to_extension_call(invocation: &ToolInvocation) -> ExtensionToolCall<'_>
         });
     }
     ExtensionToolCall {
+        process_executor: Some(Arc::new(super::extension_process::CoreProcessExecutor(
+            Arc::downgrade(invocation),
+        ))),
         turn_id: invocation.turn.sub_id.clone(),
         call_id: invocation.call_id.clone(),
         tool_name: invocation.tool_name.clone(),
@@ -500,6 +510,14 @@ mod tests {
         let captured_call = captured_call.lock().await.clone().expect("captured call");
         assert!(weak_session.upgrade().is_none());
         assert!(weak_turn.upgrade().is_none());
+        assert_eq!(
+            captured_call
+                .process_executor
+                .as_ref()
+                .expect("process capability")
+                .check_available("ended-invocation"),
+            Err("tool invocation has ended".into())
+        );
         assert_eq!(captured_call.turn_id, turn_id);
         assert_eq!(captured_call.call_id, "call-extension");
         assert_eq!(

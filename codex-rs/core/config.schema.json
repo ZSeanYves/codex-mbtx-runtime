@@ -2083,6 +2083,31 @@
       },
       "type": "object"
     },
+    "MbtxConfig": {
+      "additionalProperties": false,
+      "description": "Experimental programmable MoonBit tool. Executables are selected by the host.",
+      "properties": {
+        "dependency_cache": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Preinstalled MoonBit dependency-source cache; copied into invocation scratch."
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "moon": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "moonrun": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "type": "object"
+    },
     "McpEnterpriseManagedAuthConfig": {
       "additionalProperties": false,
       "properties": {
@@ -6852,6 +6877,14 @@
       "default": {},
       "description": "User-level marketplace entries keyed by marketplace name.",
       "type": "object"
+    },
+    "mbtx": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/MbtxConfig"
+        }
+      ],
+      "description": "Experimental programmable MoonBit execution tool."
     },
     "mcp_enterprise_managed_auth": {
       "allOf": [

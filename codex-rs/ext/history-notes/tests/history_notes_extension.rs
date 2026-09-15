@@ -423,6 +423,7 @@ fn exposed_tools(
 
 fn tool_call(tool_name: ToolName, arguments: serde_json::Value) -> ToolCall<'static> {
     ToolCall {
+        process_executor: None,
         turn_id: "turn-1".to_string(),
         call_id: "call-read-file".to_string(),
         tool_name,

@@ -104,6 +104,11 @@ impl ToolExposure {
 /// Host crates can layer routing, hooks, telemetry, or other orchestration on
 /// top without reopening the spec/runtime split.
 pub trait ToolExecutor<Invocation>: Send + Sync {
+    /// Bounded time to finish owned cleanup after cancellation, before forced abort.
+    fn cancellation_grace_period(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
     /// The concrete tool name handled by this runtime instance.
     fn tool_name(&self) -> ToolName;
 

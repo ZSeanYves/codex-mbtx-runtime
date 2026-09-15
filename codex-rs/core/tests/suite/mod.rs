@@ -101,6 +101,8 @@ mod json_result;
 mod live_cli;
 #[path = "managed_threads_tests.rs"]
 mod managed_threads;
+#[cfg(unix)]
+mod mbtx;
 mod mcp_auth_elicitation;
 mod mcp_auth_refresh;
 mod mcp_ema_config;

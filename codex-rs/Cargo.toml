@@ -68,6 +68,7 @@ members = [
     "ext/image-generation",
     "ext/items",
     "ext/memories",
+    "ext/mbtx",
     "ext/mcp",
     "ext/queue",
     "ext/skills",
@@ -211,6 +212,7 @@ codex-exec-server = { path = "exec-server" }
 codex-exec-server-test-support = { path = "exec-server/tests/support" }
 codex-execpolicy = { path = "execpolicy" }
 codex-extension-api = { path = "ext/extension-api" }
+codex-mbtx-extension = { path = "ext/mbtx" }
 codex-extension-items = { path = "ext/items" }
 codex-goal-extension = { path = "ext/goal" }
 codex-git-attribution = { path = "ext/git-attribution" }

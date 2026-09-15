@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use std::time::Instant;
 
 use tokio::sync::RwLock;
@@ -39,6 +41,11 @@ struct ToolCallTimingGuard {
     call_id: String,
     tool_name: codex_tools::ToolName,
 }
+
+/// Largest cleanup allowance requested by a tool actually dispatched this turn.
+/// Kept in turn data so live config changes cannot shorten in-flight cleanup.
+#[derive(Default)]
+pub(crate) struct ToolCancellationGrace(pub(crate) AtomicU64);
 
 #[derive(Clone)]
 pub(crate) struct ToolCallRuntime {
@@ -123,9 +130,19 @@ impl ToolCallRuntime {
         let router = &step_context.tool_router;
         let supports_parallel = router.tool_supports_parallel(&call);
         let tool_runtime = router.tool_runtime(&call.tool_name);
+        let cancellation_grace = tool_runtime
+            .as_ref()
+            .map_or(Duration::ZERO, |tool| tool.cancellation_grace_period())
+            .min(Duration::from_secs(10));
         let router = Arc::clone(router);
         let session = Arc::clone(&self.session);
         let turn = Arc::clone(&step_context.turn);
+        if !cancellation_grace.is_zero() {
+            turn.extension_data
+                .get_or_init(ToolCancellationGrace::default)
+                .0
+                .fetch_max(cancellation_grace.as_millis() as u64, Ordering::Relaxed);
+        }
         let tracker = Arc::clone(&self.tracker);
         let lock = Arc::clone(&self.parallel_execution);
         let invocation_cancellation_token = cancellation_token.clone();
@@ -220,6 +237,11 @@ impl ToolCallRuntime {
                     if terminal_outcome_reached.load(Ordering::Acquire) || dispatch_handle.is_finished() {
                         dispatch_handle.await.map_err(Self::tool_task_join_error)?
                     } else {
+                        if !cancellation_grace.is_zero()
+                            && let Ok(result) = tokio::time::timeout(cancellation_grace, &mut dispatch_handle).await
+                        {
+                            return result.map_err(Self::tool_task_join_error)?;
+                        }
                         let secs = started.elapsed().as_secs_f32().max(0.1);
                         abort_dispatch_span.record("aborted", true);
                         dispatch_handle.abort();

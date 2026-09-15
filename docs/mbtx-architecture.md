@@ -1,19 +1,18 @@
 # Programmable MBTX Architecture
 
-**Status:** Accepted architectural direction; implementation has not started.
+**Status:** Accepted architecture; stage-one product implementation is validated on macOS.
 **Baseline inspected:** `31ffe2bc9adccfe5fd3d29208250f796a13aa7a0` on 2026-09-15.
 **Scope:** The `ZSeanYves/codex-mbtx-runtime` fork of `openai/codex`.
 
 This document defines the responsibilities, dependency boundaries, runtime
 contracts, and evidence requirements for programmable MBTX research. It is the
-authoritative architecture for this fork. It records source inspection, not a
-successful build, a working MBTX integration, or experimental results.
+authoritative architecture for this fork. The [stage-one implementation record](mbtx-stage-one.md)
+documents the executable subset, target decision, validation and limitations.
 
-The initial change creates only this document, its discovery links, and empty
-`.gitkeep` files. Reserved directories are not active Cargo or MoonBit packages.
-No new manifests, dependencies, configuration keys, commands, or workflows are
-registered. API field names and commands described as proposed below become
-supported only with their implementation and validation.
+The initial foundation reserved directories using `.gitkeep` files. Stage one
+now activates the product extension, host bridge, fixtures and thin validation
+entry. The evaluator, analysis module and observability deployment remain
+reserved. Contracts beyond that documented executable subset remain planned.
 
 ## Contents
 
@@ -46,7 +45,7 @@ cost, less model reasoning, or fewer machine instructions.
 
 Use two experiment arm labels: `shell_tool` and `mbtx_program`. These describe
 research conditions, not existing configuration keys. Shell remains the product
-default. Programmable MBTX will require explicit enablement.
+default. Programmable MBTX requires explicit enablement.
 
 | Repository                                                            | Responsibility                                                                                                                  |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -98,7 +97,7 @@ codex-mbtx-runtime/
 │   ├── core/, tools/, exec-server/   # Existing host services
 │   ├── rollout-trace/, otel/         # Existing observation services
 │   ├── ext/mbtx/
-│   │   ├── src/.gitkeep              # Reserved product crate sources
+│   │   ├── src/                     # Programmable MBTX extension
 │   │   └── tests/.gitkeep
 │   └── mbtx-eval/
 │       ├── src/.gitkeep              # Reserved evaluation adapter sources
@@ -106,9 +105,9 @@ codex-mbtx-runtime/
 ├── mbtx/
 │   ├── evaluation/.gitkeep           # Reserved MoonBit analysis package
 │   ├── cmd/evaluation-model/.gitkeep # Reserved analysis executable
-│   ├── fixtures/.gitkeep             # Fixed inputs and example programs
-│   ├── scripts/.gitkeep              # Thin .mbtx automation
-│   ├── config/.gitkeep               # Public templates, no credentials
+│   ├── fixtures/                     # Fixed inputs and example programs
+│   ├── scripts/                      # Thin .mbtx automation
+│   ├── config/                       # Public templates, no credentials
 │   └── observability/.gitkeep        # Collector and SigNoz configuration
 ├── docs/mbtx-architecture.md         # This document
 ├── codex-cli/, sdk/                  # Existing distribution and SDK areas
@@ -191,7 +190,7 @@ MBTX program runtime. SigNoz and its services remain optional for tool use.
 
 The initial interface accepts one program per invocation, with no persistent
 language heap. Files in the permitted workspace can preserve task state. The
-following fields are proposed contract concepts, not an implemented JSON schema:
+following fields define the initial tool contract; stage one implements them:
 
 | Input                                | Required behavior                                                                                           |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
@@ -246,8 +245,8 @@ sequenceDiagram
     T-->>C: Bounded result with explicit failure stage
 ```
 
-The diagram is a proposed lifecycle. A cache hit may skip compilation, but never
-skips execution authorization or validation of artifact identity.
+The diagram is the lifecycle contract. Stage one always compiles. A future cache
+hit may skip compilation, but never execution authorization or artifact validation.
 
 Source preparation, compiler subprocesses, generated programs, and descendants
 all operate within the effective Codex authority. Whole-program approval does
@@ -280,13 +279,13 @@ to `1.95.0`. Keep the upstream pin until a justified update. MoonBit development
 may follow the latest supported release; each experiment freezes the actual
 compiler/runtime versions and dependency contents for its complete run.
 
-The program execution target is **open**. Compare native and an appropriate
-official Wasm runner using one small capability prototype before implementing
-target-specific public contracts. Verify file access, JSON, child processes,
-UTF-8/stdio, exit semantics, policy, and cancellation on the target platforms.
-Choose one target for the first experiment. A Wasm host policy, if used, is not
-evidence that a spawned native child is confined; OS enforcement still needs
-validation. The evaluator's own target is an independent build choice.
+The first program target is **`wasm` with official `moonrun`**, chosen after a
+native/Wasm capability prototype. The [implementation record](mbtx-stage-one.md)
+identifies the tested tools and platform. File access, JSON, child processes,
+UTF-8/stdio, exit semantics, policy and cancellation require actual execution
+checks. A Wasm host policy alone is not evidence that a spawned native child is
+confined; OS enforcement still needs validation. The evaluator's target remains
+an independent future build choice.
 
 | Cost                                                                             | Treatment                                                             |
 | -------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
@@ -522,8 +521,8 @@ second unchanged bundle preparation must reuse completed artifacts.
 
 | Stage                         | Deliverable and acceptance evidence                                                                                                                                                                                                                                        |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Foundation                    | This architecture and inert directory reservations. No claim of a working program tool.                                                                                                                                                                                    |
-| Capability prototype and tool | Verify the unmodified baseline build; choose one target; run one inline program through actual Codex policy. Cover literal arguments, environment/cwd, streams, compilation/runtime errors, approval denial, cancellation, reap/drain, and unavailable configuration.      |
+| Foundation                    | Completed: architecture and directory reservations.                                                                                                                                                                                                                       |
+| Capability prototype and tool | Completed on macOS: unmodified baseline build; Wasm target selection; actual Codex policy; literal arguments, environment/cwd, streams, compilation/runtime errors, approval denial, cancellation, reap/drain, and unavailable configuration. |
 | Step identity                 | Add only missing logical-round associations. Hand-check multiple tools per response, final answer, 429/retry, partial stream with side effects, interruption, compaction, resume, and repair labeling. Trace reduction reproduces expected counts without double counting. |
 | Evaluation and observation    | Activate the adapter and MoonBit module; validate deterministic oracles, request pacing, immutable attempts, faults, missing data, HTML escaping, report reconstruction, SigNoz import, and build reuse.                                                                   |
 | Code delivery                 | Ship reviewed implementation, scoped tests, fixed replay, fixtures, configuration, and runnable collection guidance. Record any unresolved platform boundary.                                                                                                              |
@@ -534,10 +533,7 @@ relevant prototype before depending on it:
 
 | Decision                                          | Required evidence                                                                                                                    |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Native versus Wasm execution                      | Equivalent required capabilities and enforceable policy/lifecycle on intended platforms; choose one first.                           |
-| Host execution bridge location                    | An acyclic integration that reaches actual approval, sandbox, cancellation, and process services from the intended Codex entrypoint. |
 | Logical-step instrumentation placement            | Inspect loop/transport retries and verify accepted-response counts against fixed traces, including auxiliary work.                   |
-| Tool name and public configuration schema         | Validate registration/exposure, bounded inputs/results, and disabled-by-default behavior in the runnable prototype.                  |
 | Relay adapter reuse                               | Confirm forwarding, complete-stream serialization, cooldown, cancellation, and real request counts with controlled endpoints.        |
 | Sample sizes and task budgets                     | Pilot task difficulty/request cost, then a frozen protocol and analysis plan; no outcome-based selection.                            |
 | Collector deployment and public artifact location | Demonstrate ingestion and standalone reconstruction while keeping credentials out of published data.                                 |

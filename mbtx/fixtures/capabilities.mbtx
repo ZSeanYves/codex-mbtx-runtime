@@ -1,0 +1,30 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/async@0.21.3/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+
+async fn main {
+  let args = @env.args()
+  guard args.length() == 4 else { fail("expected path and two literal arguments") }
+  let text = "MoonBit UTF-8: λ雪\n"
+  @fs.write_file(args[1], text)
+  let content = @fs.read_file(args[1])
+  assert_eq(content.text(), text)
+  let child = @shell.Cmd("/usr/bin/printf", ["%s|%s", args[2], args[3]]).output()
+  assert_eq(child.exit_code(), 0)
+  assert_eq(child.stdout(), args[2] + "|" + args[3])
+  let value : Json = {
+    "argv": [args[2].to_json(), args[3].to_json()],
+    "cwd": @env.current_dir().to_json(),
+    "env": @env.get_env_var("MBTX_CAPABILITY_ENV").to_json(),
+    "text": content.text().to_json(),
+    "child": child.stdout().to_json(),
+  }
+  assert_eq(@json.parse(value.stringify()), value)
+  @stdio.stderr.write("separate stderr: λ雪\n")
+  println(value.stringify())
+}

@@ -20,6 +20,7 @@ mod in_app_browser_requirements;
 mod key_aliases;
 pub mod loader;
 mod marketplace_edit;
+pub mod mbtx;
 mod mcp_edit;
 mod mcp_ema;
 mod mcp_requirements;

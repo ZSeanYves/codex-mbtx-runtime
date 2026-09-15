@@ -2209,6 +2209,7 @@ dependencies = [
  "codex-http-client",
  "codex-image-generation-extension",
  "codex-login",
+ "codex-mbtx-extension",
  "codex-mcp",
  "codex-mcp-extension",
  "codex-memories-extension",
@@ -3005,6 +3006,7 @@ dependencies = [
  "codex-image-generation-extension",
  "codex-install-context",
  "codex-login",
+ "codex-mbtx-extension",
  "codex-mcp",
  "codex-memories-read",
  "codex-model-provider",
@@ -3856,6 +3858,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-mbtx-extension"
+version = "0.0.0"
+dependencies = [
+ "codex-config",
+ "codex-extension-api",
+ "codex-file-system",
+ "codex-tools",
+ "codex-utils-path-uri",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "codex-mcp"
 version = "0.0.0"
 dependencies = [
@@ -4693,6 +4710,7 @@ dependencies = [
  "codex-utils-absolute-path",
  "codex-utils-cargo-bin",
  "codex-utils-output-truncation",
+ "codex-utils-path-uri",
  "codex-utils-string",
  "jsonptr",
  "pretty_assertions",

@@ -1644,6 +1644,7 @@ async fn skills_list_only_returns_model_visible_bounded_metadata() -> TestResult
         arguments: serde_json::json!({"authority": {"kind": "orchestrator"}}).to_string(),
     };
     let call = ToolCall {
+        process_executor: None,
         turn_id: "turn-1".to_string(),
         call_id: "call-1".to_string(),
         tool_name: list_tool.tool_name(),
@@ -1804,6 +1805,7 @@ async fn skills_list_only_returns_model_visible_bounded_metadata() -> TestResult
     };
     let error = read_tool
         .handle(ToolCall {
+            process_executor: None,
             turn_id: "turn-1".to_string(),
             call_id: "insufficient-read-budget".to_string(),
             tool_name: read_tool.tool_name(),
@@ -1909,6 +1911,7 @@ async fn orchestrator_catalog_snapshot_caches_failure() -> TestResult {
     assert_eq!(
         list_tool
             .handle(ToolCall {
+                process_executor: None,
                 turn_id: "turn-1".to_string(),
                 call_id: "unavailable-skills".to_string(),
                 tool_name: list_tool.tool_name(),
