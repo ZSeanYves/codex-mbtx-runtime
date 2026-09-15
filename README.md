@@ -1,3 +1,11 @@
+## Programmable MBTX research fork
+
+This fork studies task completion with a programmable MoonBit tool and a Shell tool control. The [MBTX architecture](docs/mbtx-architecture.md) describes the package boundaries, execution contract, step measurements, and implementation stages.
+
+MBTX development currently consists of an architecture document and empty directory placeholders. The MBTX tool and evaluation commands are not implemented. The installation instructions below describe upstream Codex, not an MBTX-enabled release.
+
+---
+
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
