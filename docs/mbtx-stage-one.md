@@ -216,6 +216,56 @@ their prescribed model trajectory cannot demonstrate a reduction in agent steps.
 The denied-write case covers both MoonBit file operations and a spawned native
 child, so confinement is tested beyond the Wasm host's own file API.
 
+### Linux validation record
+
+A user-operated Linux run completed the validation entry. The copied terminal
+transcript was received on 2026-09-16; this is the receipt date, not an observed
+execution timestamp. The [original transcript](validation/stage-one-linux-2026-09-16/terminal.txt)
+is preserved byte for byte, including the initial missing-command failure and
+subsequent successful run. The [manifest](validation/stage-one-linux-2026-09-16/manifest.json)
+records its SHA-256, source references, tool versions, suite IDs and evidence
+limits. The transcript contains 1,196 individual `PASS` records, matching the
+three suite summaries:
+
+| Selected suite | Tests run | Passed | Failed | Outside selection / skipped | Runner elapsed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Configuration, shared tools and MBTX extension | 426 | 426 | 0 | 0 | 0.541 s |
+| Core configuration, execution, policy and lifecycle | 762 | 762 | 0 | 1,757 | 27.476 s |
+| Real Codex + MoonBit fixed-SSE integration | 8 | 8 | 0 | 1,828 | 7.823 s |
+
+All eight MBTX integration cases ran: disabled-tool exclusion, CLI registration
+and execution, literal argv/cwd/environment/stream preservation, distinct compile
+and runtime failures, approval denial, denied file writes, timeout, and real
+interruption with reap before turn termination. The skipped counts do not refer
+to these eight cases. Each integration case uses a prescribed local model
+response; no live model or relay is needed.
+
+The recorded `git pull` fast-forwards from `6aa09b22a` to `ca53d000a`. That
+attributes the successful invocation to the updated validation entry, but no
+`git status`, binary hash or standalone `git rev-parse HEAD` was captured.
+Working-tree cleanliness therefore remains unknown. The recorded host is
+`x86_64-unknown-linux-gnu`; moon and moonrun are `0.1.20260904 (94521db)`,
+Cargo is `1.95.0`, just is `1.58.0`, cargo-nextest is `0.9.144`, and Python is
+`3.12.11`. The Rust toolchain pin is `1.95.0`; the transcript does not record
+`rustc --version`, `moonc --version`, the Linux distribution or the kernel.
+
+The first attempt built the CLI in 3m 26s before failing to start the next
+command. After installing just and cargo-nextest, preflight passed, the fixture
+reported no work, and Cargo's CLI build finished in 0.54s using existing
+artifacts. Installation warnings about yanked helper-tool dependencies and an
+existing unused import in `openai_file_mcp.rs` are retained in the transcript;
+they did not prevent the successful validation run.
+
+This is Linux x86_64 functional validation of the bounded stage-one tool,
+complementing the local macOS ARM64 validation. Runner elapsed times include
+test harness work and must not be interpreted as workload latency or a
+Shell/MBTX speed comparison. A copied terminal transcript is not a process-trace
+bundle or an independent reproduction by the reviewer. It does not establish
+agent-step savings, arbitrary-program compatibility, live relay reliability,
+or a passing full upstream workspace suite.
+
+### Broader macOS regression checks
+
 Broader upstream tests are a separate regression check. The first complete
 changed-library run executed 2,955 tests: 2,947 passed, seven failed and one
 timed out. Review identified a new session-retention defect in the process
@@ -259,7 +309,7 @@ generic host infrastructure; the product crate depends only on lower-level
 contracts and exports `install`. Evaluation and observability packages have not
 been activated.
 
-Local validation results and the second review are recorded after the final
-implementation checks. Linux execution must be repeated on Linux before making
-platform coverage claims. Step accounting, evaluator activation, live relay
-collection, SigNoz ingestion and research reports remain later stages.
+Local macOS validation and the user-supplied Linux validation above support the
+bounded stage-one implementation on those tested platforms. Step accounting,
+evaluator activation, live relay collection, SigNoz ingestion and research
+reports remain later stages.

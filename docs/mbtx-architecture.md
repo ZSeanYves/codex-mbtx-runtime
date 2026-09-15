@@ -1,6 +1,6 @@
 # Programmable MBTX Architecture
 
-**Status:** Accepted architecture; stage-one product implementation is validated on macOS.
+**Status:** Accepted architecture; bounded stage-one tool validation passed on macOS ARM64 and Linux x86_64. The Linux record is a reviewed user-supplied terminal transcript.
 **Baseline inspected:** `31ffe2bc9adccfe5fd3d29208250f796a13aa7a0` on 2026-09-15.
 **Scope:** The `ZSeanYves/codex-mbtx-runtime` fork of `openai/codex`.
 
@@ -522,7 +522,7 @@ second unchanged bundle preparation must reuse completed artifacts.
 | Stage                         | Deliverable and acceptance evidence                                                                                                                                                                                                                                        |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Foundation                    | Completed: architecture and directory reservations.                                                                                                                                                                                                                       |
-| Capability prototype and tool | Completed on macOS: unmodified baseline build; Wasm target selection; actual Codex policy; literal arguments, environment/cwd, streams, compilation/runtime errors, approval denial, cancellation, reap/drain, and unavailable configuration. |
+| Capability prototype and tool | Completed: unmodified baseline build and native/Wasm target comparison on macOS; bounded tool validation on macOS ARM64 and Linux x86_64. The [stage-one record](mbtx-stage-one.md#linux-validation-record) preserves the Linux transcript, coverage and evidence limits. |
 | Step identity                 | Add only missing logical-round associations. Hand-check multiple tools per response, final answer, 429/retry, partial stream with side effects, interruption, compaction, resume, and repair labeling. Trace reduction reproduces expected counts without double counting. |
 | Evaluation and observation    | Activate the adapter and MoonBit module; validate deterministic oracles, request pacing, immutable attempts, faults, missing data, HTML escaping, report reconstruction, SigNoz import, and build reuse.                                                                   |
 | Code delivery                 | Ship reviewed implementation, scoped tests, fixed replay, fixtures, configuration, and runnable collection guidance. Record any unresolved platform boundary.                                                                                                              |
