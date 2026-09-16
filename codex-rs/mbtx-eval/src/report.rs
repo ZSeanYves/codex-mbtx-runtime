@@ -71,6 +71,7 @@ pub(crate) async fn assess_attempt(
         .cloned()
         .unwrap_or(Value::Null);
     let mut errors = Vec::new();
+    let mut tool_results = serde_json::Map::new();
     let assignment_valid = assignment["attempt_id"] == attempt_id.as_ref()
         && matches!(
             assignment["arm"].as_str(),
@@ -91,7 +92,23 @@ pub(crate) async fn assess_attempt(
         let bundles = directories(&directory.join("trace"))?;
         if bundles.len() == 1 {
             match codex_rollout_trace::replay_bundle(&bundles[0]) {
-                Ok(value) => trace = serde_json::to_value(value)?,
+                Ok(value) => {
+                    trace = serde_json::to_value(value)?;
+                    for (id, tool) in trace["tool_calls"].as_object().context("native tools")? {
+                        if tool["kind"]["name"] != "mbtx" {
+                            continue;
+                        }
+                        let payload = tool["raw_result_payload_id"]
+                            .as_str()
+                            .and_then(|id| trace["raw_payloads"][id]["path"].as_str());
+                        let result = payload.and_then(|path| {
+                            let path = bundles[0].join(crate::evidence::safe_relative(path).ok()?);
+                            let raw = read_json(&path).ok()?;
+                            Some(json!({"evidence":path.strip_prefix(directory).ok()?,"output":serde_json::from_str::<Value>(raw["response_item"]["output"].as_str()?).ok()?}))
+                        }).unwrap_or(Value::Null);
+                        tool_results.insert(id.clone(), result);
+                    }
+                }
                 Err(error) => errors.push(format!("native reduction: {error}")),
             }
         } else {
@@ -136,7 +153,7 @@ pub(crate) async fn assess_attempt(
     } else {
         Value::Null
     };
-    let facts = json!({"attempt_id":attempt_id,"pair_id":assignment["pair_id"],"arm":assignment["arm"],"trace":trace,"snapshot":snapshot,"outcome":outcome,"execution_error":read_json(&directory.join("execution-error.json")).unwrap_or(Value::Null),"exchanges":exchanges,"integrity":integrity,"evidence":{"directory":format!("attempts/{attempt_id}"),"errors":errors}});
+    let facts = json!({"attempt_id":attempt_id,"pair_id":assignment["pair_id"],"arm":assignment["arm"],"trace":trace,"tool_results":tool_results,"snapshot":snapshot,"outcome":outcome,"execution_error":read_json(&directory.join("execution-error.json")).unwrap_or(Value::Null),"exchanges":exchanges,"integrity":integrity,"evidence":{"directory":format!("attempts/{attempt_id}"),"errors":errors}});
     analysis
         .query(json!({"op":"attempt","task":task,"facts":facts}))
         .await
@@ -183,11 +200,16 @@ fn render(model: &Value, format: &str) -> Result<String> {
         "Arm".into(),
         "Status".into(),
         "Oracle".into(),
+        "Started steps".into(),
         "Accepted steps".into(),
-        "HTTP sends".into(),
+        "Native request starts".into(),
+        "Observed upstream sends".into(),
         "Tool calls".into(),
-        "Tool errors".into(),
-        "Repair steps (unknown)".into(),
+        "Invocation failures".into(),
+        "MBTX compile failures".into(),
+        "MBTX execution failures".into(),
+        "Shell command failures".into(),
+        "Shared edit calls".into(),
         "Evidence".into(),
     ]];
     for a in model["attempts"].as_array().context("attempts")? {
@@ -196,11 +218,16 @@ fn render(model: &Value, format: &str) -> Result<String> {
             cell(&a["arm"]),
             cell(&a["status"]),
             cell(&a["oracle"]["success"]),
+            cell(&a["accounting"]["metrics"]["agent_steps_started"]),
             cell(&a["accounting"]["metrics"]["agent_steps"]),
             cell(&a["accounting"]["metrics"]["model_requests"]),
+            cell(&a["upstream_requests_observed"]),
             cell(&a["accounting"]["metrics"]["tool_calls"]),
             cell(&a["accounting"]["metrics"]["tool_errors"]),
-            cell(&a["accounting"]["metrics"]["repair_steps"]),
+            cell(&a["tool_outcomes"]["mbtx_compile_failures"]),
+            cell(&a["tool_outcomes"]["mbtx_execution_failures"]),
+            cell(&a["tool_outcomes"]["shell_command_failures"]),
+            cell(&a["tool_outcomes"]["shared_edit_calls"]),
             cell(&a["evidence"]["directory"]),
         ]);
     }
@@ -218,7 +245,7 @@ fn render(model: &Value, format: &str) -> Result<String> {
             + "\r\n");
     }
     let summary = format!(
-        "Run {} | {} | {} | partial={}\nShell: {} successful / {} assigned. MBTX: {} successful / {} assigned.\nComparable successful pairs: {}. Mean MBTX minus Shell steps: {}.\nPilot only; fixed replay is not research evidence. Unknown values remain null.",
+        "Run {} | {} | {} | partial={}\nShell: {} successful / {} assigned. MBTX: {} successful / {} assigned.\nComparable successful pairs: {}. Mean MBTX minus Shell steps: {}.\nPilot only; fixed replay is not research evidence. Unknown values remain null. Failed attempts have no steps-to-success value. Invocation, compilation and child-command failures are distinct layers and may overlap. A passing file oracle with shared edits does not establish implementation through an MBTX program.",
         cell(&model["run_id"]),
         cell(&model["mode"]),
         cell(&model["platform"]),

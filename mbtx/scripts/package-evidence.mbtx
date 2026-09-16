@@ -1,0 +1,40 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/env",
+}
+
+async fn main {
+  let args = @env.args()
+  guard args.length() == 2 else { fail("Usage: moon run mbtx/scripts/package-evidence.mbtx RUN (after the collector stops)") }
+  let run = @fs.realpath(args[1])
+  let parts = run.split("/").to_array()
+  let name = parts[parts.length() - 1].to_owned()
+  let parent = run.strip_suffix(name).unwrap().to_owned()
+  for required in ["run.json", "run.sha256", "attempts", "fixtures", "probes", "reports"] {
+    guard @fs.exists(run + "/" + required) else { fail("Missing evidence: \{required}") }
+  }
+  let output = run + "-evidence.tar.gz"
+  guard !@fs.exists(output) && !@fs.exists(output + ".sha256") else { fail("Archive already exists; it will not be overwritten") }
+  let pending = output + ".pending-\{@env.now()}"
+  @shell.Cmd("tar", ["--exclude=\{name}/workspaces", "--exclude=\{name}/collector.lock", "-czf", pending, "-C", parent, name]).run()
+  // Reading the entire compressed archive checks its trailer before publication.
+  let check = @shell.Cmd("tar", ["-tzf", pending]).output(max_output_bytes=16000000)
+  guard check.exit_code() == 0 else { fail(check.stderr()) }
+  for required in ["run.json", "run.sha256"] {
+    guard check.stdout().contains("\{name}/\{required}\n") else { fail("Archive lacks \{required}") }
+  }
+  @fs.rename(pending, output, replace=false)
+  let platform = @shell.Cmd("uname", ["-s"]).output().stdout().trim()
+  let archive_name = name + "-evidence.tar.gz"
+  let checksum = if platform == "Darwin" {
+    @shell.Cmd("shasum", ["-a", "256", archive_name], cwd=parent).output()
+  } else {
+    @shell.Cmd("sha256sum", [archive_name], cwd=parent).output()
+  }
+  guard checksum.exit_code() == 0 else { fail(checksum.stderr()) }
+  @fs.write_file(output + ".sha256", checksum.stdout())
+  println("Verified archive: \{output}")
+  println("SHA-256: \{checksum.stdout().trim()}")
+}

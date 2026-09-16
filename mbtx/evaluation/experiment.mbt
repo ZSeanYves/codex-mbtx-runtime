@@ -90,6 +90,19 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     "status": status.to_json(),
     "oracle": oracle,
     "accounting": accounting,
+    "tool_outcomes": tool_outcomes(
+      trace,
+      field(facts, "tool_results"),
+      complete=field(field(accounting, "coverage"), "tool_results") ==
+        true.to_json(),
+    ),
+    "upstream_requests_observed": exchanges
+    .filter(e => {
+      field(field(e, "headers"), "send_ns") != Json::null() ||
+      field(e, "send_ns") != Json::null()
+    })
+    .length()
+    .to_json(),
     "outcome": outcome,
     "exchanges": exchanges.to_json(),
     "evidence": field(facts, "evidence"),
@@ -274,7 +287,7 @@ pub fn analyze_experiment(
   }
   {
     "schema_version": 1,
-    "analysis_version": "programmable-steps-v1",
+    "analysis_version": "programmable-steps-v2",
     "run_id": field(manifest, "run_id"),
     "mode": field(manifest, "mode"),
     "platform": field(manifest, "platform"),

@@ -30,6 +30,19 @@ async fn main {
   let bundle = @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
   let evaluator = bundle + "/mbtx-eval"
   let root = "_build/stage-three-validation/run-\{@env.now()}"
+  // Exercise the exact versioned example exposed in the MBTX tool description.
+  let example = @fs.realpath("codex-rs/ext/mbtx/src/example.mbtx")
+  let example_work = root + "-example"
+  @fs.mkdir(example_work, recursive=true)
+  @fs.write_file(example_work + "/input.json", "{\"message\":\"UTF-8 雪\",\"value\":17}\n")
+  @shell.Cmd("moon", ["build", "--frozen", "--target", "wasm", "--release", "--target-dir", "build", example], cwd=example_work).run()
+  let example_run = @shell.Cmd(bundle + "/moonrun", ["build/wasm/release/build/single/single.wasm"], cwd=example_work).output()
+  assert_eq(example_run.exit_code(), 0)
+  assert_eq(example_run.stdout(), "λ雪\n")
+  assert_eq(@json.parse(@fs.read_file(example_work + "/copy.json").text()), @json.parse(@fs.read_file(example_work + "/input.json").text()))
+  @fs.mkdir(example_work + "/empty-path")
+  let missing = @shell.Cmd(evaluator,["run","--bundle",bundle,"--output",root + "-missing-tool","--mode","relay"],env={"PATH":@fs.realpath(example_work + "/empty-path")}).output()
+  guard missing.exit_code() != 0 && missing.stderr().contains("required utility rg is missing") && !@fs.exists(root + "-missing-tool") else {fail("missing utility did not stop collection before credentials and probes")}
   @shell.Cmd(evaluator,["run","--bundle",bundle,"--output",root,"--mode","replay"]).run()
   let reports : Array[String] = []
   @fs.walk(root + "/reports", max_concurrency=1, (path, files) => {
@@ -40,6 +53,9 @@ async fn main {
   guard @json.parse(original) is {"partial":False,"conditional":{"pairs":Number(8,..),..},"attempts":Array(attempts),..} else {fail("replay did not produce eight comparable pairs")}
   for attempt in attempts {
     guard attempt is {"status":String("success"),"oracle":{"success":True,..},"accounting":{"complete":True,"metrics":{"agent_steps":Number(2,..),..},..},..} else {fail("fixed replay failed: \{attempt.stringify()}")}
+    if attempt is {"task_id":String("configuration-repair"), "arm":String("mbtx_program"), "tool_outcomes":{"details":Object(details),..},..} {
+      guard details.values().any(item => item is {"output":{"build":{"stderr_truncated":True,..},"run":{"stdout":String("runtime output retained\n"),"stdout_truncated":False,..},..},..}) else {fail("compiler warnings evicted runtime output")}
+    }
   }
   @shell.Cmd(evaluator,["report",root,"--bundle",bundle,"--format","all"]).run()
   @fs.walk(root + "/reports", max_concurrency=1, (path, files) => {

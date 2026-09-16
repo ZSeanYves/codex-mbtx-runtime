@@ -301,7 +301,8 @@ pub fn analyze_steps(trace : Json) -> Json raise {
     "inferences": inferences.to_json(),
     "possible_repairs": repairs.to_json(),
     "limitations": warnings.to_json(),
-    "request_scope": "Observed inference HTTP sends. Auxiliary endpoints and WebSocket sends have no total coverage claim.",
+    "request_scope": "Native inference HTTP starts, including work canceled before upstream dispatch. Compare separately with the collector's observed upstream sends. Auxiliary endpoints and WebSocket sends have no total coverage claim.",
+    "tool_error_scope": "Tool invocation failures only. A successfully returned exec_command can contain a nonzero child exit. Compiler, MBTX execution and Shell command failures are reported separately by attempt analysis.",
     "repair_attribution": "unknown; candidates are inferred, not confirmed repair steps",
   }
 }

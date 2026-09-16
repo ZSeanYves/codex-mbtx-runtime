@@ -69,8 +69,15 @@ pub(crate) fn fixed(task: &Value, arm: &str) -> Result<Vec<Reply>> {
     let output = task["output"].as_str().context("output file")?;
     let expected = serde_json::to_string(&task["expected"])?;
     let arguments = if arm == "mbtx_program" {
+        // The configuration fixture reproduces compiler warnings exhausting a
+        // combined output budget. Its runtime marker must still reach Codex.
+        let warnings = if task["id"] == "configuration-repair" {
+            "  let _ = @json.parse(\"null\").to_string();\n".repeat(24)
+        } else {
+            String::new()
+        };
         let source = format!(
-            "import {{\n  \"moonbitlang/async@0.21.3\",\n  \"moonbitlang/async@0.21.3/fs\",\n}}\nasync fn main {{\n  @fs.write_file({}, {})\n}}\n",
+            "import {{\n  \"moonbitlang/async@0.21.3\",\n  \"moonbitlang/async@0.21.3/fs\",\n}}\nasync fn main {{\n{warnings}  @fs.write_file({}, {})\n  println(\"runtime output retained\")\n}}\n",
             serde_json::to_string(output)?,
             serde_json::to_string(&(expected + "\n"))?
         );

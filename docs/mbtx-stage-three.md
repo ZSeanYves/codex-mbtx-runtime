@@ -26,13 +26,23 @@ complete script. MBTX may invoke native utilities within the same permissions.
 
 ## Pilot protocol
 
-The `programmable-steps-pilot-v1` protocol defines eight goals: repository indexing,
+The `programmable-steps-pilot-v2` protocol defines eight goals: repository indexing,
 structured aggregation, Unicode record normalization, subprocess orchestration,
 log diagnosis, configuration repair, bounded-output inspection, and recovery of a
 partially processed dataset. Inputs and oracles are stored in the run manifest;
 only inputs and goals enter each workspace. The independent oracle compares
 structured output and verifies preservation of other task inputs. It does not
 accept a model's assertion that the task succeeded.
+
+Version two states output field names and types in each model-visible goal. It
+preserves tasks and expected values but does not pool new attempts with version-one
+samples. Recovery merge now explicitly requires `total`; the earlier prompt did
+not fix that key. Old manifests and reports retain their original verdicts.
+
+The MBTX tool includes a bounded, versioned file/JSON/child-process example, executed
+by offline validation. Both arms receive the same utility and dependency reference.
+Successful compiler diagnostics occupy at most half the combined stream budget,
+preserving runtime output space; failed builds keep the full diagnostic budget.
 
 These are small pilot tasks, not a representative coding benchmark. The process
 task's oracle validates its result objects; it does not prove how the agent
@@ -44,6 +54,14 @@ The initial pilot uses one pair per task. Adjacent pairs alternate AB/BA; a fixe
 seed permutes task order. Each arm receives its own workspace, HOME, Codex home,
 session and mutable program build state. Fixed fixture files and dependencies are
 prepared once; model-generated source is compiled during real tool work.
+
+Project instruction loading and automatic skill instructions are disabled, project
+config discovery stops at the workspace, and login-shell initialization is disabled.
+`agents.enabled=false` disables delegation. The gate checks top-level tools and
+namespaced `additional_tools` before forwarding. It refuses unexpected tools or
+inherited instruction fragments and preserves rejected requests as harness evidence.
+Common editing tools remain available in both arms and their calls are reported:
+file correctness alone does not establish production or verification through MBTX.
 
 The pilot allows 12 logical steps, 24 emitted tool calls, 16 HTTP sends and 600
 seconds per arm. The request boundary checks budgets and a 100 ms native-trace
@@ -62,7 +80,11 @@ be frozen after the pilot. Fixed-response replay is a separate validation mode.
 ## Build and run
 
 Use the fork's Rust toolchain and the latest installed MoonBit toolchain. Install
-`just` and `cargo-nextest` using Cargo if they are absent. From the repository root:
+`just` and `cargo-nextest` using Cargo if they are absent. Both arms also require
+`rg`, `jq`, `sh`, and `git` on PATH. On Debian/Ubuntu, install missing utilities with
+`sudo apt-get install ripgrep jq git`; on macOS, use `brew install ripgrep jq git`.
+The collector records resolved utility paths and SHA-256 hashes before any API
+request. Resume refuses a changed PATH or required executable. From the repo root:
 
 ```bash
 git pull --ff-only origin main
@@ -124,6 +146,19 @@ moon run mbtx/scripts/collect-pilot.mbtx relay --tasks structured-summary,config
 
 A full eight-goal pilot is recommended before changing task difficulty or sample
 size. This phase does not collect the former launcher benchmark's 192 pairs.
+
+After collection stops, package evidence without dependency copies and workspaces:
+
+```bash
+moon run mbtx/scripts/package-evidence.mbtx <RUN>
+```
+
+This creates `<RUN>-evidence.tar.gz` and its `.sha256` sidecar, including the run
+manifest, fixtures, probes, attempts and reports. It verifies the compressed archive
+before publication and refuses overwrite. Send both files; no task rerun is needed.
+The checksum uses the archive's basename, so it can be verified after transfer with
+`sha256sum -c <RUN>-evidence.tar.gz.sha256` on Linux or
+`shasum -a 256 -c <RUN>-evidence.tar.gz.sha256` on macOS from the archive directory.
 
 ## Pacing and recovery
 
@@ -192,6 +227,13 @@ records the analyzer bundle and seals its outputs; changing analysis rules never
 replaces a previous report. HTTP success without a terminal Responses event is
 an external stream failure. Local evidence write failures are harness failures.
 
+Reports distinguish native request starts from observed upstream dispatches, and
+invocation failures from MBTX compilation/execution and Shell command failures.
+The latter categories may overlap with invocation failures and are not additive.
+Missing result payloads remain unknown. A budget-exhausted attempt's accepted-step
+count is not its steps-to-success value. Shared edit counts remain visible even
+when the independent file oracle passes.
+
 Use SigNoz for interactive timelines. The native OTel batches and derived step
 spans share attempt identifiers. Start the official Collector once with
 `mbtx/observability/collector.yaml`, setting `MBTX_OTEL_ARCHIVE` to a writable
@@ -254,6 +296,27 @@ The offline validation run was `run-1789533732520`, using bundle fingerprint
 explicit collection-platform guard do not retroactively change that bundle.
 The Collector check proves OTLP ingestion, not deployment or usability of the
 SigNoz interface. SigNoz UI validation remains pending a local installation.
+
+The protocol-v2 correction was checked separately on macOS ARM64 on 2026-09-16:
+
+| Check | Observed result |
+| --- | --- |
+| Pure models and scoped Rust packages | 15 MoonBit tests and 75 Rust tests passed. |
+| Real Codex execution | All 16 fixed-response arms and all 16 recorded-response arms passed their independent file oracles. |
+| Tool and context isolation | Captured task requests exposed the assigned execution interface and common tools, without delegation or inherited repository/skill instructions. |
+| Compiler diagnostic pressure | A real successful build with repeated warnings preserved the runtime marker and reported diagnostic truncation. The exact model-visible file/JSON/child-process example also executed successfully. |
+| Faults, interruption and reproducibility | Eight external-fault arms, SIGKILL recovery, deterministic reconstruction, immutable resume and unchanged-bundle reuse passed again. |
+| Archived pilot accounting | Reanalysis of the recovered Linux attempt records identified 79 MBTX compilation failures and eight Shell command failures. Original evidence and oracle verdicts were not changed. |
+| Evidence transfer | Complete compressed archives passed checksum verification; an existing archive was refused without modifying its checksum. |
+
+The full offline run was `run-1789544721282`, with bundle
+`50c4111e7aa87005f507b342192a04bc3e3fb539`. Subsequent accounting checks covered
+incomplete tool evidence and upstream sends that failed before response headers;
+bundle `fc22681b764063601396d9f08594000b2e883ae9` reconstructed that run with
+16 successful arms and eight comparable pairs. This correction used no live relay
+requests. It validates the harness and runtime fixes; whether the model now solves
+the tasks through MBTX remains a question for a new Linux pilot. Version-one and
+version-two attempts must not be pooled as one treatment.
 
 The stage-two Linux archive `run-1789527207143.zip` was reviewed on 2026-09-16:
 eight captures reproduced their states and reports byte for byte, and all 134

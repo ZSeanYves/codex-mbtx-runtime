@@ -153,6 +153,29 @@ test "incomplete Responses and local evidence errors have distinct attribution" 
 }
 
 ///|
+test "native starts and upstream sends remain distinct when no headers arrive" {
+  let report = @evaluation.analyze_attempt(Json::null(), {
+    "trace": Json::null(),
+    "exchanges": [
+      { "send_ns": 17, "transport_error": true },
+      { "headers": { "send_ns": 23 } },
+      { "complete": false },
+    ],
+    "outcome": { "termination": "exited", "exit_code": 1 },
+    "integrity": true,
+  })
+  guard report
+    is {
+      "status": String("relay_error"),
+      "upstream_requests_observed": Number(2, ..),
+      "accounting": { "metrics": { "model_requests": Null, .. }, .. },
+      ..
+    } else {
+    fail(report.stringify())
+  }
+}
+
+///|
 test "a successful arm with missing step coverage is retained outside paired analysis" {
   let manifest : Json = {
     "run_id": "r",
