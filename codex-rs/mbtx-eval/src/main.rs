@@ -11,6 +11,7 @@ mod http_headers;
 mod observe;
 mod replay;
 mod report;
+mod request_contract;
 
 use anyhow::Context;
 use anyhow::Result;

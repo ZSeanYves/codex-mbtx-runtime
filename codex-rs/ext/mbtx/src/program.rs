@@ -56,6 +56,10 @@ impl ProgramResult {
                         shortened = true;
                     }
                 }
+                // Compiler diagnostics must not evict runtime output first.
+                if shortened {
+                    break;
+                }
             }
             if !shortened {
                 return Err(FunctionCallError::RespondToModel("MBTX result metadata exceeds the host response budget; execution artifacts remain in the workspace".into()));
@@ -188,7 +192,7 @@ pub(crate) async fn execute(
             .clamp(1, 4096)
             .min(call.response_byte_budget(32768).saturating_sub(8192) / 6);
         result.stage = "compilation";
-        let build = executor
+        let mut build = executor
             .execute(ToolProcessRequest {
                 environment_id: environment.environment_id.clone(),
                 command: vec![
@@ -217,6 +221,25 @@ pub(crate) async fn execute(
             })
             .await?;
         let build_ok = build.status == ToolProcessStatus::Exited && build.exit_code == Some(0);
+        if build_ok {
+            // Preserve at least half the combined stream budget for execution.
+            // Failed builds retain the full budget because no run follows them.
+            let mut diagnostics = budget / 2;
+            for (text, truncated) in [
+                (&mut build.stdout, &mut build.stdout_truncated),
+                (&mut build.stderr, &mut build.stderr_truncated),
+            ] {
+                let mut length = diagnostics.min(text.len());
+                while !text.is_char_boundary(length) {
+                    length -= 1;
+                }
+                if length < text.len() {
+                    text.truncate(length);
+                    *truncated = true;
+                }
+                diagnostics -= length;
+            }
+        }
         let remaining = budget.saturating_sub(build.stdout.len() + build.stderr.len());
         result.build = Some(build);
         if !build_ok {

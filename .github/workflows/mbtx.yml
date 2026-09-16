@@ -73,7 +73,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
       - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
-          tool: just,cargo-nextest
+          tool: just,cargo-nextest,ripgrep
       - uses: moonbitlang/moonbit-docs/.github/actions/setup@474bc051f101bfe88d8d6a1889b2f49c60f78de0
       - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
         with:

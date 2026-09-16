@@ -120,6 +120,19 @@ pub(crate) fn child_config(
         bundle.join("models.json").to_string_lossy().as_ref().into(),
     );
     value.insert("tool_output_token_limit".into(), 4096.into());
+    value.insert("project_doc_max_bytes".into(), 0.into());
+    value.insert("project_root_markers".into(), toml::Value::Array(vec![]));
+    value.insert("allow_login_shell".into(), false.into());
+    value.insert(
+        "agents".into(),
+        toml::Value::try_from(BTreeMap::from([("enabled", false)]))?,
+    );
+    value.insert(
+        "skills".into(),
+        toml::Value::try_from(
+            serde_json::json!({"include_instructions":false,"bundled":{"enabled":false}}),
+        )?,
+    );
     value.insert("suppress_unstable_features_warning".into(), true.into());
     value.insert(
         "analytics".into(),
@@ -149,7 +162,6 @@ pub(crate) fn child_config(
             ("code_mode", false),
             ("code_mode_only", false),
             ("code_mode_host", false),
-            ("multi_agent", false),
             ("multi_agent_v2", false),
             ("plugins", false),
             ("apps", false),

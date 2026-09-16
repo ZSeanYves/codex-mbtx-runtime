@@ -251,34 +251,6 @@ async fn exchange(
             .body(Body::from("evaluation request budget exhausted"))?);
     }
     let body: serde_json::Value = serde_json::from_slice(&bytes)?;
-    // Inspect what Codex actually exposes, rather than trusting feature flags.
-    if let Some(tools) = body["tools"].as_array() {
-        let names: Vec<_> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-        anyhow::ensure!(
-            !names
-                .iter()
-                .any(|n| matches!(*n, "js" | "spawn_agent" | "mcp")),
-            "Code Mode or delegation leaked into evaluation"
-        );
-        if route.arm == "mbtx_program" {
-            anyhow::ensure!(
-                names.contains(&"mbtx")
-                    && !names
-                        .iter()
-                        .any(|n| matches!(*n, "exec_command" | "shell" | "shell_command")),
-                "MBTX arm tool exposure mismatch"
-            );
-        }
-        if route.arm == "shell_tool" {
-            anyhow::ensure!(
-                !names.contains(&"mbtx")
-                    && names
-                        .iter()
-                        .any(|n| matches!(*n, "exec_command" | "shell" | "shell_command")),
-                "Shell arm tool exposure mismatch"
-            );
-        }
-    }
     let directory = route
         .directory
         .join("http")
@@ -295,6 +267,10 @@ async fn exchange(
         &json!(crate::http_headers::facts(&forwarded_headers)),
     )?;
     write_new(&directory.join("request.json"), &bytes)?;
+    // Preserve rejected requests too; they are harness evidence, never relay failures.
+    if path == "responses" {
+        crate::request_contract::validate(&body, &route.arm)?;
+    }
     let queued = gate.epoch.elapsed().as_nanos() as u64;
     let mut permit = gate.rate.clone().lock_owned().await;
     anyhow::ensure!(

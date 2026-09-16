@@ -43,3 +43,35 @@ fn escaped_output_fits_the_response_budget_without_fabricating_observations() {
         )
     );
 }
+
+#[test]
+fn successful_compiler_warnings_do_not_evict_runtime_output() {
+    let output = |stdout: String, stderr: String| ToolProcessOutput {
+        status: ToolProcessStatus::Exited,
+        exit_code: Some(0),
+        signal: None,
+        stdout,
+        stderr,
+        stdout_truncated: false,
+        stderr_truncated: false,
+        duration_ms: 1,
+    };
+    let mut result = ProgramResult {
+        status: "success",
+        stage: "completed",
+        target: "wasm",
+        source_path: None,
+        artifact_path: None,
+        error: None,
+        build: Some(output(String::new(), "compiler warning 雪\n".repeat(1000))),
+        run: Some(output("observed runtime output\n".into(), String::new())),
+    };
+    result.fit_response(700).unwrap();
+    assert!(serde_json::to_vec(&result).unwrap().len() <= 700);
+    assert!(result.build.unwrap().stderr_truncated);
+    let run = result.run.unwrap();
+    assert_eq!(
+        (run.stdout, run.stdout_truncated),
+        ("observed runtime output\n".into(), false)
+    );
+}

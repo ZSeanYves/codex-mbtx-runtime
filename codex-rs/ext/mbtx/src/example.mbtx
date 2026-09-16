@@ -1,0 +1,15 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/json",
+}
+
+async fn main {
+  let value = @json.parse(@fs.read_file("input.json").text())
+  @fs.write_file("copy.json", value.stringify() + "\n")
+  assert_eq(@json.parse(@fs.read_file("copy.json").text()), value)
+  let child = @shell.Cmd("printf", ["%s", "λ雪"]).output()
+  guard child.exit_code() == 0 else { fail(child.stderr()) }
+  println(child.stdout())
+}

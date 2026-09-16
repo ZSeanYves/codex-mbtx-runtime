@@ -118,6 +118,15 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
     );
     let bundle = args.bundle.canonicalize()?;
     let bundle_info = bundle::verify(&bundle)?;
+    let path = std::env::var("PATH").context("PATH is required")?;
+    let mut utilities = serde_json::Map::new();
+    for name in ["rg", "jq", "sh", "git"] {
+        let executable = which::which(name).with_context(|| format!("required utility {name} is missing; install ripgrep, jq and git before collection"))?.canonicalize()?;
+        utilities.insert(
+            name.into(),
+            json!({"path":executable,"sha256":crate::evidence::digest(&fs::read(&executable)?)}),
+        );
+    }
     let config = RelayConfig::load(&args.config)?;
     let key = if args.mode == "relay" {
         config.credential(args.credentials_file.as_deref())?
@@ -191,6 +200,8 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                 && previous["min_interval_ms"] == args.min_interval_ms
                 && previous["schedule"] == json!(expected_schedule)
                 && previous["protocol"] == protocol
+                && previous["path"] == path
+                && previous["utilities"] == json!(utilities)
                 && previous["replay_fault"] == json!(args.replay_fault)
                 && previous["replay_source"] == json!(args.replay_source),
             "resume requires the original bundle, protocol, configuration and schedule"
@@ -219,6 +230,9 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         }
         let fixture_seals = crate::evidence::hashes(&args.output.join("fixtures"))?;
         let manifest = json!({"schema_version":1,"run_id":uuid::Uuid::new_v4().to_string(),"created_ms":now_ms(),"mode":args.mode,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,"bundle":bundle_info,"protocol":protocol,"schedule":expected_schedule,"config":config,"min_interval_ms":args.min_interval_ms,"seed":args.seed,"path":std::env::var("PATH").unwrap_or_default(),"replay_source":args.replay_source,"replay_fault":args.replay_fault,"fixture_hashes":fixture_seals});
+        let mut manifest = manifest;
+        manifest["path"] = json!(path);
+        manifest["utilities"] = json!(utilities);
         json_new(&args.output.join("run.json"), &manifest)?;
         write_new(
             &args.output.join("run.sha256"),
