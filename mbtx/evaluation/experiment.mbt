@@ -30,7 +30,7 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
   } else {
     analyze_steps(trace)
   }
-  let oracle : Json = if task == Json::null() {
+  let visible_oracle : Json = if task == Json::null() {
     {
       "success": Json::null(),
       "reason": "No valid task assignment",
@@ -38,6 +38,22 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     }
   } else {
     task_oracle(task, field(facts, "snapshot"))
+  }
+  let validation = field(facts, "submission")
+  let oracle : Json = if field(task, "acceptance") == Json::string("programs") {
+    let submitted = submission_oracle(task, validation)
+    if field(visible_oracle, "success") != true.to_json() {
+      {
+        "success": field(visible_oracle, "success"),
+        "reason": "Visible workspace oracle did not pass",
+        "confidence": field(visible_oracle, "confidence"),
+        "submitted_program": submitted,
+      }
+    } else {
+      submitted
+    }
+  } else {
+    visible_oracle
   }
   let outcome = field(facts, "outcome")
   let termination = field(outcome, "termination")
@@ -57,6 +73,7 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
   })
   let status = if field(facts, "execution_error") != Json::null() ||
     field(facts, "integrity") == false.to_json() ||
+    field(validation, "status") == Json::string("harness_error") ||
     exchanges.any(item => field(item, "evidence_error") == true.to_json()) {
     "harness_error"
   } else if outcome == Json::null() {
@@ -89,6 +106,13 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     "arm": field(facts, "arm"),
     "status": status.to_json(),
     "oracle": oracle,
+    "visible_oracle": visible_oracle,
+    "submission": validation,
+    "workspace": field(facts, "workspace"),
+    "family": field(task, "family"),
+    "scenario": field(task, "scenario"),
+    "variant": field(task, "variant"),
+    "acceptance": field(task, "acceptance"),
     "accounting": accounting,
     "tool_outcomes": tool_outcomes(
       trace,
@@ -196,6 +220,9 @@ pub fn analyze_experiment(
   attempts : Array[Json],
 ) -> Json raise {
   let schedule : Array[Json] = @json.from_json(field(manifest, "schedule"))
+  let formal = field(field(manifest, "protocol"), "suite") ==
+    Json::string("programs") ||
+    field(field(manifest, "protocol"), "suite") == Json::string("workflow")
   let pairs : Array[Json] = []
   let by_arm : Map[String, Json] = Map([])
   for arm in ["shell_tool", "mbtx_program"] {
@@ -203,6 +230,11 @@ pub fn analyze_experiment(
     let success = selected
       .filter(a => field(a, "status") == Json::string("success"))
       .length()
+    let statuses : Map[String, Int] = Map([])
+    for attempt in selected {
+      let status = string_field(attempt, "status")
+      statuses[status] = statuses.get(status).unwrap_or(0) + 1
+    }
     let curve : Array[Json] = []
     for budget in [1, 2, 4, 8, 12] {
       let count = selected
@@ -227,6 +259,8 @@ pub fn analyze_experiment(
     by_arm[arm] = {
       "assigned": schedule.length().to_json(),
       "captured": selected.length().to_json(),
+      "not_started": (schedule.length() - selected.length()).to_json(),
+      "statuses": statuses.to_json(),
       "successes": success.to_json(),
       "external_failures": selected
       .filter(a => {
@@ -251,8 +285,22 @@ pub fn analyze_experiment(
     let b = members
       .filter(a => field(a, "arm") == Json::string("mbtx_program"))
       .get(0)
+    let baseline_equal : Json = match (a, b) {
+      (Some(a), Some(b)) => {
+        let left = field(field(a, "workspace"), "baseline_commit")
+        let right = field(field(b, "workspace"), "baseline_commit")
+        if left == Json::null() || right == Json::null() {
+          Json::null()
+        } else {
+          (left == right).to_json()
+        }
+      }
+      _ => Json::null()
+    }
     let difference : Json = match (a, b) {
-      (Some(a), Some(b)) if comparable(a) && comparable(b) => {
+      (Some(a), Some(b)) if comparable(a) &&
+        comparable(b) &&
+        (!formal || baseline_equal == true.to_json()) => {
         let ac : Int = @json.from_json(
           field(field(field(a, "accounting"), "metrics"), "agent_steps"),
         )
@@ -270,6 +318,36 @@ pub fn analyze_experiment(
     pairs.push({
       "pair_id": id,
       "task_id": field(pair, "task_id"),
+      "family": field(pair, "family"),
+      "scenario": field(pair, "scenario"),
+      "variant": field(pair, "variant"),
+      "repeat": field(pair, "repeat"),
+      "workspace_baseline_equal": baseline_equal,
+      "comparison_exclusion": if formal && baseline_equal != true.to_json() {
+        "Missing or unequal initial workspace commits"
+      } else if difference == Json::null() {
+        "Two successful arms with complete step evidence required"
+      } else {
+        Json::null()
+      },
+      "shell_status": match a {
+        Some(a) => field(a, "status")
+        None => Json::null()
+      },
+      "mbtx_status": match b {
+        Some(b) => field(b, "status")
+        None => Json::null()
+      },
+      "shell_steps": match a {
+        Some(a) =>
+          field(field(field(a, "accounting"), "metrics"), "agent_steps")
+        None => Json::null()
+      },
+      "mbtx_steps": match b {
+        Some(b) =>
+          field(field(field(b, "accounting"), "metrics"), "agent_steps")
+        None => Json::null()
+      },
       "step_difference_mbtx_minus_shell": difference,
       "first_divergence": divergence,
       "attempt_ids": members.map(a => field(a, "attempt_id")).to_json(),
@@ -287,26 +365,45 @@ pub fn analyze_experiment(
   }
   {
     "schema_version": 1,
-    "analysis_version": "programmable-steps-v2",
+    "analysis_version": "programmable-steps-v3",
     "run_id": field(manifest, "run_id"),
     "mode": field(manifest, "mode"),
     "platform": field(manifest, "platform"),
     "protocol_id": field(field(manifest, "protocol"), "protocol_id"),
     "manifest_integrity": field(manifest, "manifest_integrity"),
     "collection_stop_reason": field(manifest, "collection_stop_reason"),
-    "population": "pilot; all scheduled arms retained",
+    "population": if formal {
+      field(field(manifest, "protocol"), "population")
+    } else {
+      "pilot; all scheduled arms retained"
+    },
+    "suite": field(field(manifest, "protocol"), "suite"),
     "partial": (attempts.length() != schedule.length() * 2 ||
     attempts.any(a => field(a, "status") == Json::string("censored"))).to_json(),
     "itt": by_arm.to_json(),
-    "conditional": {
-      "pairs": deltas.length().to_json(),
-      "mean_step_difference": if deltas.is_empty() {
-        Json::null()
-      } else {
-        (total / deltas.length().to_double()).to_json()
-      },
-      "confidence_interval": Json::null(),
-      "interval_reason": "Formal uncertainty design is frozen after the pilot; small pilot repetitions are not independent tasks.",
+    "conditional": if formal {
+      study_uncertainty(pairs)
+    } else {
+      {
+        "pairs": deltas.length().to_json(),
+        "mean_step_difference": if deltas.is_empty() {
+          Json::null()
+        } else {
+          (total / deltas.length().to_double()).to_json()
+        },
+        "confidence_interval": Json::null(),
+        "interval_reason": "Formal uncertainty design is frozen after the pilot; small pilot repetitions are not independent tasks.",
+      }
+    },
+    "by_family": if formal {
+      study_strata(pairs, attempts, "family")
+    } else {
+      []
+    },
+    "by_scenario": if formal {
+      study_strata(pairs, attempts, "scenario")
+    } else {
+      []
     },
     "pairs": pairs.to_json(),
     "attempts": attempts.to_json(),
@@ -326,7 +423,13 @@ pub fn evaluate_request(request : Json) -> Json raise {
     fail("Unsupported analysis protocol")
   }
   match string_field(request, "op") {
-    "protocol" => pilot_protocol()
+    "protocol" =>
+      if field(request, "suite") == Json::null() ||
+        field(request, "suite") == Json::string("pilot") {
+        pilot_protocol()
+      } else {
+        study_protocol(string_field(request, "suite"))
+      }
     "steps" => analyze_steps(field(request, "trace"))
     "attempt" =>
       analyze_attempt(field(request, "task"), field(request, "facts"))
