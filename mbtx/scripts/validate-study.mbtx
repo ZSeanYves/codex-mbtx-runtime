@@ -1,0 +1,53 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+
+async fn main {
+  let bundle=@fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
+  let evaluator=bundle+"/mbtx-eval"
+  let root="_build/study-validation/run-\{@env.now()}"
+  let command=["run","--bundle",bundle,"--output",root,"--suite","programs","--mode","replay","--variants","1","--repeats","1","--min-interval-ms","0","--batch-pairs","12"]
+  @shell.Cmd(evaluator,command).run()
+  let seals : Map[String,String] = Map([])
+  @fs.walk(root+"/attempts",max_concurrency=1,(path,files)=> {
+    if files.contains("seal.json") {seals[path+"/seal.json"]=@fs.read_file(path+"/seal.json").text()}
+  })
+  assert_eq(seals.length(),24)
+  @fs.walk(root+"/reports",max_concurrency=1,(path,files)=> {
+    if files.contains("report.json") {
+      guard @json.parse(@fs.read_file(path+"/report.json").text()) is {"partial":True,"conditional":{"pairs":Number(12,..),..},..} else {fail("first batch did not retain the full planned schedule")}
+    }
+  })
+  let resume_command=command.copy()
+  resume_command.push("--resume")
+  @shell.Cmd(evaluator,resume_command).run()
+  for path, content in seals {assert_eq(@fs.read_file(path).text(),content)}
+  let mut complete=false
+  @fs.walk(root+"/reports",max_concurrency=1,(path,files)=> {
+    if files.contains("report.json") {
+      let report=@json.parse(@fs.read_file(path+"/report.json").text())
+      if report is {"partial":False,"conditional":{"pairs":Number(24,..),..},"attempts":Array(attempts),..} {
+        complete=true
+        assert_eq(attempts.length(),48)
+        for attempt in attempts {
+          guard attempt is {"status":String("success"),"accounting":{"metrics":{"agent_steps":Number(2,..),..},..},"submission":{"cases":Array(cases),..},..} else {fail("actual Codex study replay failed: \{attempt.stringify()}")}
+          assert_eq(cases.length(),3)
+        }
+      }
+    }
+  })
+  guard complete else {fail("no complete study replay report")}
+  // Exercise the secondary acceptance condition separately; no pooling.
+  @shell.Cmd(evaluator,["run","--bundle",bundle,"--output",root+"-workflow","--suite","workflow","--mode","replay","--scenarios","large-log","--variants","2","--repeats","1","--min-interval-ms","0"]).run()
+  @fs.walk(root+"-workflow/reports",max_concurrency=1,(path,files)=> {
+    if files.contains("report.json") {
+      guard @json.parse(@fs.read_file(path+"/report.json").text()) is {"suite":String("workflow"),"conditional":{"pairs":Number(1,..),..},..} else {fail("workflow cohort failed")}
+    }
+  })
+  println("Study validation passed: 24 real-Codex pairs, 144 fresh-input executions, two immutable batches, workspace boundary checks and an independent workflow pair. No live requests or research-benefit inference.")
+  println("Evidence: \{root}")
+}

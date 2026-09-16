@@ -90,6 +90,9 @@ jobs:
           name: programmable-mbtx-offline
           path: |
             _build/stage-three-validation
+            _build/study-validation
+            !_build/stage-three-validation/**/workspaces/**
+            !_build/study-validation/**/workspaces/**
             _build/evaluation-bundles/preparation-*.json
 
   required:

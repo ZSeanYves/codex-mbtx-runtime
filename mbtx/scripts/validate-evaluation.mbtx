@@ -27,6 +27,8 @@ async fn main {
   @shell.Cmd("just", ["test", "-p", "codex-mbtx-eval", "-p", "codex-mbtx-extension", "-p", "codex-rollout-trace", "--locked", "--retries=0"], env=build_env).run()
   if args.contains("--fast") { println("Stage-three fast validation passed"); return }
   @shell.Cmd("moon", ["run", "mbtx/scripts/prepare-evaluation.mbtx"]).run()
+  @shell.Cmd("moon", ["run", "mbtx/scripts/validate-study-fixtures.mbtx"]).run()
+  @shell.Cmd("moon", ["run", "mbtx/scripts/validate-study.mbtx"]).run()
   let bundle = @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
   let evaluator = bundle + "/mbtx-eval"
   let root = "_build/stage-three-validation/run-\{@env.now()}"
@@ -105,6 +107,6 @@ async fn main {
   // An unchanged preparation must reuse the existing bundle without compilers.
   @shell.Cmd("moon", ["run", "mbtx/scripts/prepare-evaluation.mbtx"]).run()
   assert_eq(@fs.read_file("_build/evaluation-bundle.txt").text().trim(),bundle[:])
-  println("Stage-three offline validation passed: 16 fixed arms, eight fault arms, collector SIGKILL recovery, 16 recorded arms, immutable resume, deterministic reports and bundle reuse. No online research result is inferred.")
+  println("Stage-three offline validation passed: 24 study pairs and 144 submission executions, 288 fixture checks, one workflow pair, 16 pilot arms, eight fault arms, collector SIGKILL recovery, 16 recorded arms, immutable resume, deterministic reports and bundle reuse. No online research result is inferred.")
   println("Evidence: \{root}")
 }

@@ -1,0 +1,26 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/env",
+}
+
+async fn main {
+  let args=@env.args()
+  guard args.length()>=2 && ["replay","relay"].contains(args[1]) else {
+    fail("Usage: moon run mbtx/scripts/collect-study.mbtx replay|relay [mbtx-eval run options]")
+  }
+  let bundle=@env.get_env_var("MBTX_BUNDLE").unwrap_or_else(() => @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned())
+  let platform=@shell.Cmd("uname",["-s"]).output().stdout().trim().to_owned()
+  if args[1]=="relay" && platform!="Linux" {fail("The current online study protocol requires Linux")}
+  let command=["run","--bundle",bundle,"--mode",args[1]]
+  if !args.contains("--suite") {command.append(["--suite","programs"])}
+  if !args.contains("--output") {
+    guard !args.contains("--resume") else {fail("--resume requires the original --output RUN directory")}
+    let output="_build/programmable-study/"+platform+"/"+args[1]+"/run-\{@env.now()}"
+    command.append(["--output",output])
+    println("Study output: \{output}")
+  }
+  command.append(args[2:])
+  @shell.Cmd(bundle+"/mbtx-eval",command).run()
+}

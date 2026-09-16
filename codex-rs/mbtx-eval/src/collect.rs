@@ -36,18 +36,27 @@ pub(crate) struct RunArgs {
     pub output: PathBuf,
     #[arg(long, value_parser=["replay","relay"],default_value="replay")]
     pub mode: String,
+    #[arg(long,value_parser=["pilot","programs","workflow"],default_value="pilot")]
+    pub suite: String,
     #[arg(long, default_value = "mbtx/config/relay.toml")]
     pub config: PathBuf,
     #[arg(long)]
     pub credentials_file: Option<PathBuf>,
-    #[arg(long, default_value_t = 1)]
-    pub repeats: usize,
+    #[arg(long)]
+    pub repeats: Option<usize>,
+    /// Stop between pairs after this many newly attempted pairs in this invocation.
+    #[arg(long)]
+    pub batch_pairs: Option<usize>,
     #[arg(long, default_value_t = 20260916)]
     pub seed: u64,
     #[arg(long, default_value_t = 15000)]
     pub min_interval_ms: u64,
     #[arg(long, value_delimiter = ',')]
     pub tasks: Vec<String>,
+    #[arg(long, value_delimiter = ',')]
+    pub scenarios: Vec<String>,
+    #[arg(long, value_delimiter = ',')]
+    pub variants: Vec<u64>,
     #[arg(long)]
     pub resume: bool,
     #[arg(long)]
@@ -66,9 +75,9 @@ fn schedule(tasks: &[Value], repeats: usize, seed: u64) -> Vec<Value> {
     }
     let mut pairs = Vec::new();
     for repeat in 0..repeats {
-        for &index in &order {
+        for (rank, &index) in order.iter().enumerate() {
             let n = pairs.len();
-            pairs.push(json!({"pair_id":format!("pair-{n:04}"),"task_id":tasks[index]["id"],"repeat":repeat,"arms":if n%2==0 { ["shell_tool","mbtx_program"] } else { ["mbtx_program","shell_tool"] }}));
+            pairs.push(json!({"pair_id":format!("pair-{n:04}"),"task_id":tasks[index]["id"],"family":tasks[index]["family"],"scenario":tasks[index]["scenario"],"variant":tasks[index]["variant"],"repeat":repeat,"arms":if (rank+repeat)%2==0 { ["shell_tool","mbtx_program"] } else { ["mbtx_program","shell_tool"] }}));
         }
     }
     pairs
@@ -104,10 +113,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         cfg!(unix),
         "pilot collection currently supports Linux and macOS only"
     );
-    ensure!(
-        (1..=20).contains(&args.repeats),
-        "pilot repeats must be 1..20; a formal protocol is not yet frozen"
-    );
+    ensure!(args.batch_pairs != Some(0), "batch-pairs must be positive");
     ensure!(
         args.mode != "relay" || args.min_interval_ms >= 15000,
         "relay start interval must be at least 15000 ms"
@@ -162,7 +168,15 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         None
     };
     let mut analysis = Analysis::start(&bundle).await?;
-    let protocol = analysis.query(json!({"op":"protocol"})).await?;
+    let protocol = analysis
+        .query(json!({"op":"protocol","suite":args.suite}))
+        .await?;
+    let repeats = args.repeats.unwrap_or(
+        protocol["repeats"]
+            .as_u64()
+            .context("protocol repetitions")? as usize,
+    );
+    ensure!((1..=20).contains(&repeats), "repeats must be 1..20");
     if let Some(source) = &args.replay_source {
         ensure!(
             crate::evidence::verify_manifest(source)?,
@@ -186,7 +200,28 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         );
         tasks.retain(|t| args.tasks.iter().any(|id| t["id"] == *id));
     }
-    let expected_schedule = schedule(&tasks, args.repeats, args.seed);
+    if !args.scenarios.is_empty() {
+        ensure!(
+            args.scenarios
+                .iter()
+                .all(|id| tasks.iter().any(|t| t["scenario"] == *id)),
+            "unknown scenario selection"
+        );
+        tasks.retain(|t| args.scenarios.iter().any(|id| t["scenario"] == *id));
+    }
+    if !args.variants.is_empty() {
+        ensure!(
+            args.variants.iter().all(|v| (1..=4).contains(v)),
+            "variants use one-based indices 1..4"
+        );
+        tasks.retain(|t| {
+            t["variant"]
+                .as_u64()
+                .is_some_and(|v| args.variants.contains(&(v + 1)))
+        });
+    }
+    ensure!(!tasks.is_empty(), "task selection is empty");
+    let expected_schedule = schedule(&tasks, repeats, args.seed);
     let manifest = if args.resume {
         let previous = read_json(&args.output.join("run.json"))?;
         ensure!(
@@ -299,7 +334,20 @@ async fn collect_schedule(
     }
     let mut completed = report::assess(root, analysis).await?;
     let pairs = manifest["schedule"].as_array().context("schedule")?;
+    let mut started_pairs = 0;
     for pair in pairs {
+        let pending = pair["arms"].as_array().context("arms")?.iter().any(|arm| {
+            !completed
+                .iter()
+                .any(|a| a["pair_id"] == pair["pair_id"] && a["arm"] == *arm)
+        });
+        if !pending {
+            continue;
+        }
+        if args.batch_pairs.is_some_and(|limit| started_pairs >= limit) {
+            return Ok("batch_limit");
+        }
+        started_pairs += 1;
         let task = manifest["protocol"]["tasks"]
             .as_array()
             .context("tasks")?

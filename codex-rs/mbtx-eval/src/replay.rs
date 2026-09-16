@@ -68,7 +68,27 @@ pub(crate) fn fault(name: &str) -> Reply {
 pub(crate) fn fixed(task: &Value, arm: &str) -> Result<Vec<Reply>> {
     let output = task["output"].as_str().context("output file")?;
     let expected = serde_json::to_string(&task["expected"])?;
-    let arguments = if arm == "mbtx_program" {
+    let boundary = "test \"$(git rev-parse --show-toplevel)\" = \"$PWD\" && test -z \"$(git status --porcelain)\" && test ! -r ../../../run.json";
+    let arguments = if let Some(script) = task["reference_shell"].as_str() {
+        if arm == "mbtx_program" {
+            // This uses a declared Shell utility from MBTX. It validates the
+            // collector and generalization oracle, not MoonBit efficiency.
+            let program = format!(
+                "import {{\n  \"moonbitlang/async@0.21.3\",\n  \"moonbitlang/async@0.21.3/shell\",\n}}\nasync fn main {{\n  @shell.Cmd(\"sh\",[\"-c\",{}]).run()\n}}\n",
+                serde_json::to_string(script)?
+            );
+            let source = format!(
+                "import {{\n  \"moonbitlang/async@0.21.3\",\n  \"moonbitlang/async@0.21.3/fs\",\n  \"moonbitlang/async@0.21.3/shell\",\n}}\nasync fn main {{\n  @shell.Cmd(\"sh\",[\"-c\",{}]).run()\n  @fs.write_file(\"solution.mbtx\",{})\n  @shell.Cmd(\"sh\",[\"-c\",{}]).run()\n}}\n",
+                serde_json::to_string(boundary)?,
+                serde_json::to_string(&program)?,
+                serde_json::to_string(script)?
+            );
+            json!({"source":source,"max_output_bytes":4096})
+        } else {
+            let quoted = format!("'{}'", script.replace('\'', "'\\''"));
+            json!({"cmd":format!("set -eu\n{boundary}\nprintf '%s' {quoted} > solution.sh\nsh solution.sh"),"login":false,"max_output_tokens":1024})
+        }
+    } else if arm == "mbtx_program" {
         // The configuration fixture reproduces compiler warnings exhausting a
         // combined output budget. Its runtime marker must still reach Codex.
         let warnings = if task["id"] == "configuration-repair" {

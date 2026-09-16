@@ -48,7 +48,7 @@ enum Operation {
         bundle: PathBuf,
     },
     /// Run pilot goals with a real relay, or prescribed local Responses.
-    Run(collect::RunArgs),
+    Run(Box<collect::RunArgs>),
     /// Execute recorded HTTP responses into new attempts, never overwrite input.
     Replay {
         run: PathBuf,
@@ -77,10 +77,6 @@ enum Operation {
         #[arg(long, default_value = "http://127.0.0.1:4318")]
         endpoint: String,
     },
-    /// Small deterministic subprocess fixture shared by both arms.
-    Square {
-        value: i32,
-    },
 }
 
 fn default_bundle(value: Option<PathBuf>) -> Result<PathBuf> {
@@ -108,7 +104,7 @@ async fn main() -> Result<()> {
             println!("Verified {}", path.display());
         }
         Operation::Run(args) => {
-            let path = collect::run(args).await?;
+            let path = collect::run(*args).await?;
             println!("{}", path.display());
         }
         Operation::Replay {
@@ -147,12 +143,19 @@ async fn main() -> Result<()> {
                 bundle,
                 output,
                 mode: "replay".into(),
+                suite: manifest["protocol"]["suite"]
+                    .as_str()
+                    .unwrap_or("pilot")
+                    .to_owned(),
                 config: config_path,
                 credentials_file: None,
-                repeats,
+                repeats: Some(repeats),
+                batch_pairs: None,
                 seed: manifest["seed"].as_u64().context("seed")?,
                 min_interval_ms: 15000,
                 tasks,
+                scenarios: vec![],
+                variants: vec![],
                 resume: false,
                 replay_source: Some(run.canonicalize()?),
                 replay_fault: None,
@@ -166,7 +169,7 @@ async fn main() -> Result<()> {
             format,
         } => {
             let bundle = default_bundle(bundle)?;
-            bundle::verify(&bundle)?;
+            bundle::verify_analysis(&bundle)?;
             let mut worker = analysis::Analysis::start(&bundle).await?;
             println!(
                 "{}",
@@ -181,6 +184,7 @@ async fn main() -> Result<()> {
             follow,
         } => {
             let bundle = default_bundle(bundle)?;
+            bundle::verify_analysis(&bundle)?;
             let mut worker = analysis::Analysis::start(&bundle).await?;
             loop {
                 let manifest = evidence::read_json(&run.join("run.json"))?;
@@ -231,10 +235,6 @@ async fn main() -> Result<()> {
         Operation::ImportOtel { run, endpoint } => println!(
             "Imported {} OTLP batches",
             observe::import(&run, &endpoint).await?
-        ),
-        Operation::Square { value } => println!(
-            "{}",
-            json!({"value":value,"square":i64::from(value)*i64::from(value)})
         ),
     }
     Ok(())

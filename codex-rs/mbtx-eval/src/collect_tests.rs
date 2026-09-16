@@ -8,6 +8,26 @@ use axum::routing::post;
 use pretty_assertions::assert_eq;
 use std::sync::atomic::Ordering;
 
+#[test]
+fn seeded_assignment_preserves_pairs_and_reverses_each_input_between_rounds() {
+    let tasks = vec![
+        json!({"id":"a","scenario":"one","family":"text","variant":0}),
+        json!({"id":"b","scenario":"two","family":"data","variant":1}),
+    ];
+    let pairs = schedule(&tasks, 2, 42);
+    assert_eq!(pairs, schedule(&tasks, 2, 42));
+    for task in tasks {
+        let rows = pairs
+            .iter()
+            .filter(|p| p["task_id"] == task["id"])
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["arms"][0], rows[1]["arms"][1]);
+        assert_eq!(rows[0]["arms"][1], rows[1]["arms"][0]);
+        assert_eq!(rows[0]["scenario"], task["scenario"]);
+    }
+}
+
 #[tokio::test]
 async fn probe_uses_native_content_and_preserves_rejected_and_incomplete_responses() -> Result<()> {
     let rejected =

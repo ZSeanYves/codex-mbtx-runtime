@@ -153,7 +153,7 @@ pub(crate) async fn assess_attempt(
     } else {
         Value::Null
     };
-    let facts = json!({"attempt_id":attempt_id,"pair_id":assignment["pair_id"],"arm":assignment["arm"],"trace":trace,"tool_results":tool_results,"snapshot":snapshot,"outcome":outcome,"execution_error":read_json(&directory.join("execution-error.json")).unwrap_or(Value::Null),"exchanges":exchanges,"integrity":integrity,"evidence":{"directory":format!("attempts/{attempt_id}"),"errors":errors}});
+    let facts = json!({"attempt_id":attempt_id,"pair_id":assignment["pair_id"],"arm":assignment["arm"],"trace":trace,"tool_results":tool_results,"snapshot":snapshot,"outcome":outcome,"workspace":read_json(&directory.join("workspace.json")).unwrap_or(Value::Null),"submission":read_json(&directory.join("submission.json")).unwrap_or(Value::Null),"execution_error":read_json(&directory.join("execution-error.json")).unwrap_or(Value::Null),"exchanges":exchanges,"integrity":integrity,"evidence":{"directory":format!("attempts/{attempt_id}"),"errors":errors}});
     analysis
         .query(json!({"op":"attempt","task":task,"facts":facts}))
         .await
@@ -197,6 +197,8 @@ fn render(model: &Value, format: &str) -> Result<String> {
     }
     let mut rows = vec![vec![
         "Task".into(),
+        "Scenario".into(),
+        "Input variant".into(),
         "Arm".into(),
         "Status".into(),
         "Oracle".into(),
@@ -215,6 +217,8 @@ fn render(model: &Value, format: &str) -> Result<String> {
     for a in model["attempts"].as_array().context("attempts")? {
         rows.push(vec![
             cell(&a["task_id"]),
+            cell(&a["scenario"]),
+            cell(&a["variant"]),
             cell(&a["arm"]),
             cell(&a["status"]),
             cell(&a["oracle"]["success"]),
@@ -245,7 +249,7 @@ fn render(model: &Value, format: &str) -> Result<String> {
             + "\r\n");
     }
     let summary = format!(
-        "Run {} | {} | {} | partial={}\nShell: {} successful / {} assigned. MBTX: {} successful / {} assigned.\nComparable successful pairs: {}. Mean MBTX minus Shell steps: {}.\nPilot only; fixed replay is not research evidence. Unknown values remain null. Failed attempts have no steps-to-success value. Invocation, compilation and child-command failures are distinct layers and may overlap. A passing file oracle with shared edits does not establish implementation through an MBTX program.",
+        "Run {} | {} | {} | partial={}\nShell: {} successful / {} assigned. MBTX: {} successful / {} assigned.\nComparable successful pairs: {}. Mean MBTX minus Shell steps: {}.\nFixed replay is validation only. Failed and unstarted arms remain in assigned denominators; they have no steps-to-success value. The conditional mean and interval do not establish an unconditional advantage when success differs. Program-delivery success requires fresh-input validation; permitted native utilities remain part of the treatment. Timing is diagnostic and includes observation overhead. Unknown values remain null.",
         cell(&model["run_id"]),
         cell(&model["mode"]),
         cell(&model["platform"]),
@@ -257,6 +261,50 @@ fn render(model: &Value, format: &str) -> Result<String> {
         model["conditional"]["pairs"],
         model["conditional"]["mean_step_difference"]
     );
+    let population = format!(
+        "Protocol: {}. Suite: {}. Conditional 95% interval: {}. {}",
+        cell(&model["protocol_id"]),
+        cell(&model["suite"]),
+        cell(&model["conditional"]["confidence_interval"]),
+        cell(&model["conditional"]["interval_reason"])
+    );
+    let mut strata = String::from(
+        "| Scenario | Shell successful / assigned | MBTX successful / assigned | MBTX minus Shell steps | Conditional 95% interval |\n|---|---:|---:|---:|---|\n",
+    );
+    let mut strata_html = String::from(
+        "<table><tr><th>Scenario</th><th>Shell successful / assigned</th><th>MBTX successful / assigned</th><th>MBTX minus Shell steps</th><th>Conditional 95% interval</th></tr>",
+    );
+    for row in model["by_scenario"].as_array().into_iter().flatten() {
+        let cells = [
+            cell(&row["name"]),
+            format!(
+                "{} / {}",
+                row["itt"]["shell_tool"]["successes"], row["itt"]["shell_tool"]["assigned"]
+            ),
+            format!(
+                "{} / {}",
+                row["itt"]["mbtx_program"]["successes"], row["itt"]["mbtx_program"]["assigned"]
+            ),
+            cell(&row["conditional"]["mean_step_difference"]),
+            cell(&row["conditional"]["confidence_interval"]),
+        ];
+        strata.push_str(&format!(
+            "| {} |\n",
+            cells
+                .iter()
+                .map(|v| v.replace('|', "\\|").replace(['\r', '\n'], " "))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
+        strata_html.push_str(&format!(
+            "<tr>{}</tr>",
+            cells
+                .iter()
+                .map(|v| format!("<td>{}</td>", escape(v)))
+                .collect::<String>()
+        ));
+    }
+    strata_html.push_str("</table>");
     if format == "md" {
         let table = rows
             .iter()
@@ -271,7 +319,7 @@ fn render(model: &Value, format: &str) -> Result<String> {
             })
             .collect::<Vec<_>>();
         return Ok(format!(
-            "# Programmable MBTX pilot report\n\n{summary}\n\n{}\n|{}|\n{}\n\nFirst trajectory divergences and success-by-step curves are in report.json; their source sequences identify the raw observations. Divergence does not establish causation.\n",
+            "# Programmable MBTX evaluation report\n\n{summary}\n\n{population}\n\n{strata}\n\n## Attempt evidence\n\n{}\n|{}|\n{}\n\nFirst trajectory divergences, family strata, per-case submission validation and success-by-step curves are in report.json; their source sequences identify the raw observations. Divergence does not establish causation. Submitted source and its hash remain in each attempt's submission directory.\n",
             table[0],
             vec!["---"; rows[0].len()].join("|"),
             table[1..].join("\n")
@@ -279,8 +327,9 @@ fn render(model: &Value, format: &str) -> Result<String> {
     }
     anyhow::ensure!(format == "html", "unsupported report format");
     let mut html = format!(
-        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Programmable MBTX pilot</title><style>body{{font:16px system-ui;margin:2rem;max-width:1200px}}table{{border-collapse:collapse}}td,th{{padding:.6rem;border:1px solid #bbb;text-align:left}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}a{{color:#075bb0}}</style><h1>Programmable MBTX pilot</h1><pre>{}</pre><p>Interactive trace inspection: import the accompanying OTLP JSON into SigNoz. This summary is rebuilt solely from retained evidence.</p><table>",
-        escape(&summary)
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Programmable MBTX evaluation</title><style>body{{font:16px system-ui;margin:2rem;max-width:1200px}}table{{border-collapse:collapse}}td,th{{padding:.6rem;border:1px solid #bbb;text-align:left}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}a{{color:#075bb0}}.overflow{{overflow:auto}}summary{{cursor:pointer;margin:1rem 0}}</style><h1>Programmable MBTX evaluation</h1><pre>{}</pre><p>{}</p><p>Interactive trace inspection: import the accompanying OTLP JSON into SigNoz. This summary is rebuilt solely from retained evidence.</p><div class=\"overflow\">{strata_html}</div><details><summary>Individual attempts and raw evidence</summary><div class=\"overflow\"><table>",
+        escape(&summary),
+        escape(&population)
     );
     for (i, row) in rows.iter().enumerate() {
         html.push_str("<tr>");
@@ -298,7 +347,7 @@ fn render(model: &Value, format: &str) -> Result<String> {
         }
         html.push_str("</tr>");
     }
-    html.push_str("</table><p><a href=\"report.json\">Full analysis JSON</a></p></html>");
+    html.push_str("</table></div></details><p><a href=\"report.json\">Full analysis JSON, validation cases and source hashes</a></p></html>");
     Ok(html)
 }
 
