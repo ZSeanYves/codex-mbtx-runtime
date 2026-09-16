@@ -17,7 +17,10 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::http::HeaderValue;
 use axum::http::StatusCode;
+use axum::http::header::ACCEPT_ENCODING;
+use axum::http::header::CONTENT_TYPE;
 use axum::response::Response;
 use axum::routing::post;
 use futures::StreamExt;
@@ -282,7 +285,11 @@ async fn exchange(
         .join(format!("request-{ordinal:04}"));
     std::fs::create_dir(&directory)?;
     let preparing = gate.epoch.elapsed().as_nanos() as u64;
-    let forwarded_headers = crate::http_headers::forward(&headers);
+    let mut forwarded_headers = crate::http_headers::forward(&headers);
+    // RequestBuilder::header appends rather than replaces. Normalize these
+    // gateway-owned headers before recording or sending them, exactly once.
+    forwarded_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    forwarded_headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
     json_new(
         &directory.join("request-headers.json"),
         &json!(crate::http_headers::facts(&forwarded_headers)),
@@ -321,7 +328,7 @@ async fn exchange(
     let upstream = if reply.is_none() {
         Some(tokio::select! {
             value=gate.client.post(format!("{}/{}",gate.upstream.trim_end_matches('/'),path))
-                .headers(forwarded_headers).bearer_auth(&gate.key).header("content-type","application/json").header("accept-encoding","identity").body(bytes).send()=>value,
+                .headers(forwarded_headers).bearer_auth(&gate.key).body(bytes).send()=>value,
             _=route.closed.notified()=>anyhow::bail!("attempt cancelled before headers"),
         })
     } else {

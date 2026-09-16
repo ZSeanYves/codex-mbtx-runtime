@@ -32,6 +32,12 @@ async fn serializes_entire_stream_and_records_wire_failures_without_key() -> Res
                 let count = count.clone();
                 async move {
                     assert_eq!(headers["authorization"], "Bearer private-key-never-persist");
+                    assert_eq!(
+                        headers.get_all("content-type").iter().collect::<Vec<_>>(),
+                        vec!["application/json"],
+                        "the relay must receive exactly one JSON Content-Type"
+                    );
+                    assert_eq!(headers["accept-encoding"], "identity");
                     assert_eq!(headers["x-codex-turn-state"], "client-turn");
                     maximum.fetch_max(active.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
                     let index = count.fetch_add(1, Ordering::SeqCst);

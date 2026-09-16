@@ -13,7 +13,7 @@ use crate::evidence::read_json;
 use crate::evidence::verify;
 use crate::evidence::write_new;
 
-fn response_terminal(body: &str) -> Option<&'static str> {
+pub(crate) fn response_terminal(body: &str) -> Option<&'static str> {
     let mut data = String::new();
     let mut terminal = None;
     for line in body.lines().chain(std::iter::once("")) {

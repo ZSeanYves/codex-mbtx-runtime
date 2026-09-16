@@ -141,6 +141,20 @@ pauses after five consecutive final infrastructure failures or eight among the
 latest sixteen completed arms. Every failure keeps its pair assignment. A
 timeout, cancellation or unfinished attempt does not become a zero-step success.
 
+Each probe prints its HTTP status, error detail and evidence directory, and saves
+`summary.json` next to the complete request/response capture. A successful probe
+requires a parsed terminal `response.completed` event, not a matching phrase in
+an incomplete stream. Probe input uses Codex's typed `input_text` representation.
+
+The first Linux relay pilot (`run-1789537433934`) stopped before any task because
+all three probes returned HTTP 400, `Unsupported content type`. Inspection found
+that the gateway appended a second JSON `Content-Type` after copying the native
+header. A loopback regression reproduced the duplicate header; forwarding now
+sets the header once and records the normalized outbound metadata. This is an
+adapter request defect, not evidence of invalid credentials or a backend task
+failure. The supplied failure archive remains unchanged. After updating, prepare
+a fresh bundle and start a new run; an existing bundle contains the previous code.
+
 Use the printed bundle path for direct commands:
 
 ```bash

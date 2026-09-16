@@ -363,31 +363,71 @@ async fn probe(root: &Path, config: &RelayConfig, gate: &Arc<Gate>) -> Result<bo
         .no_proxy()
         .timeout(Duration::from_secs(120))
         .build()?;
-    for _ in 0..3 {
+    for index in 1..=3 {
         let id = format!("probe-{}", uuid::Uuid::new_v4());
         let directory = root.join("probes").join(&id);
         fs::create_dir(&directory)?;
         let route = gate
             .add(id.clone(), route(directory.clone(), "probe", None, 1)?)
             .await;
-        let response=client.post(format!("{}/a/{id}/v1/responses",gate.endpoint)).bearer_auth(&route.token)
-            .json(&json!({"model":config.model,"stream":true,"store":false,"input":[{"role":"user","content":"Reply with OK."}]})).send().await;
-        let success = match response {
-            Ok(r) if r.status().is_success() => r
-                .text()
-                .await
-                .is_ok_and(|s| s.contains("response.completed")),
-            _ => false,
+        let response = client
+            .post(format!("{}/a/{id}/v1/responses", gate.endpoint))
+            .bearer_auth(&route.token)
+            .json(&json!({
+                "model":config.model,
+                "instructions":"Reply with OK.",
+                "reasoning":{"effort":config.model_reasoning_effort},
+                "stream":true,"store":false,
+                "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Reply with OK."}]}]
+            }))
+            .send().await;
+        let (status_code, success, detail) = match response {
+            Ok(response) => {
+                let status = response.status();
+                match response.text().await {
+                    Ok(body) => {
+                        let success = status.is_success()
+                            && report::response_terminal(&body) == Some("completed");
+                        let detail = if success {
+                            None
+                        } else {
+                            let value: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+                            Some(value["error"]["message"].as_str()
+                                .unwrap_or("response did not contain a successful terminal Responses event")
+                                .chars().take(400).collect::<String>())
+                        };
+                        (Some(status.as_u16()), success, detail)
+                    }
+                    Err(error) => (Some(status.as_u16()), false, Some(error.to_string())),
+                }
+            }
+            Err(error) => (None, false, Some(error.to_string())),
         };
         route.close();
         tokio::time::timeout(Duration::from_secs(15), gate.drain())
             .await
             .context("probe stream failed to close")?;
+        json_new(
+            &directory.join("summary.json"),
+            &json!({
+                "success":success,"status_code":status_code,"detail":detail,
+                "response_evidence":"http/request-0000/response.body"
+            }),
+        )?;
         seal(&directory)?;
-        eprintln!("[eval] relay probe success={success}");
+        eprintln!(
+            "[eval] relay probe {index}/3 success={success} status={} detail={} evidence={}",
+            json!(status_code),
+            json!(detail),
+            directory.display()
+        );
         if success {
             return Ok(true);
         }
     }
     Ok(false)
 }
+
+#[cfg(test)]
+#[path = "collect_tests.rs"]
+mod tests;
