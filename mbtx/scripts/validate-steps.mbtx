@@ -1,0 +1,71 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/shell",
+  "moonbitlang/core/env",
+}
+
+async fn run_step(label : String, command : @shell.Cmd) -> Unit {
+  println("[steps] \{label}")
+  command.run() catch { error => fail("[steps] \{label} failed: \{error}") }
+}
+
+async fn main {
+  guard @fs.exists("codex-rs/Cargo.toml") && @fs.exists("mbtx/moon.mod") else {
+    fail("Run moon run mbtx/scripts/validate-steps.mbtx from the repository root.")
+  }
+  let base = @env.current_dir().unwrap_or(".") + "/_build/stage-two-step-validation"
+  if !@fs.exists(base) { @fs.mkdir(base, recursive=true) }
+  let root = base + "/run-\{@env.now()}"
+  // Nonrecursive creation refuses a collision; prior runs are never removed.
+  @fs.mkdir(root)
+  println("[steps] trace root: \{root}")
+  let env : Map[String, String] = {
+    "CODEX_ROLLOUT_TRACE_ROOT": root,
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "4",
+    "NO_PROXY": "localhost,127.0.0.1,::1",
+    "no_proxy": "localhost,127.0.0.1,::1",
+  }
+  run_step(
+    "MoonBit step analysis tests",
+    @shell.Cmd("moon", ["test", "--target", "wasm"], cwd="mbtx"),
+  )
+  run_step(
+    "MoonBit evaluator build",
+    @shell.Cmd("moon", ["build", "--target", "wasm", "--release", "cmd/evaluation-model"], cwd="mbtx"),
+  )
+  let evaluator = "mbtx/_build/wasm/release/build/cmd/evaluation-model/evaluation-model.wasm"
+  guard @fs.exists(evaluator) else { fail("missing evaluator artifact: \{evaluator}") }
+  run_step(
+    "Codex CLI build",
+    @shell.Cmd("cargo", ["build", "--locked", "-p", "codex-cli", "--bin", "codex", "-j", "4"], cwd="codex-rs", env=env),
+  )
+  run_step(
+    "native trace and request telemetry tests",
+    @shell.Cmd("just", ["test", "-p", "codex-rollout-trace", "-p", "codex-api", "-p", "codex-client", "--lib", "--test-threads=1", "--retries=0"], cwd="codex-rs", env=env),
+  )
+  run_step(
+    "fixed Responses step-accounting replay",
+    @shell.Cmd(
+      "just",
+      ["test", "-p", "codex-core", "--test", "all", "-E", "test(suite::step_accounting::)", "--run-ignored", "all", "--test-threads=1", "--retries=0"],
+      cwd="codex-rs",
+      env=env,
+    ),
+  )
+  // Every replay writes expected-steps.json only after its own assertions pass.
+  let mut verified = 0
+  @fs.walk(root, max_concurrency=1, (path, files) => {
+    if files.contains("manifest.json") && files.contains("expected-steps.json") {
+      run_step("reduce \{path}", @shell.Cmd("codex-rs/target/debug/codex", ["debug", "trace-reduce", path]))
+      run_step("analyze \{path}", @shell.Cmd("moonrun", [evaluator, "--", path + "/state.json", path + "/expected-steps.json"], stdout=@shell.ToFile(path + "/step-report.json")))
+      verified += 1
+    }
+  })
+  assert_eq(verified, 8)
+  println("[steps] verified \{verified} trace bundles; step-report.json saved in each bundle")
+  println("Stage-two step accounting validation completed. No online or research conclusion is inferred.")
+}

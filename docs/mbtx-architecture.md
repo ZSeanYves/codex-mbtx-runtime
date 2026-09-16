@@ -1,18 +1,20 @@
 # Programmable MBTX Architecture
 
-**Status:** Accepted architecture; bounded stage-one tool validation passed on macOS ARM64 and Linux x86_64. The Linux record is a reviewed user-supplied terminal transcript.
+**Status:** Accepted architecture; bounded stage-one tool validation passed on macOS ARM64 and Linux x86_64. Stage-two accounting is implemented; its Linux validation remains user-operated. Stage records distinguish completed checks from pending platform evidence.
 **Baseline inspected:** `31ffe2bc9adccfe5fd3d29208250f796a13aa7a0` on 2026-09-15.
 **Scope:** The `ZSeanYves/codex-mbtx-runtime` fork of `openai/codex`.
 
 This document defines the responsibilities, dependency boundaries, runtime
 contracts, and evidence requirements for programmable MBTX research. It is the
 authoritative architecture for this fork. The [stage-one implementation record](mbtx-stage-one.md)
-documents the executable subset, target decision, validation and limitations.
+documents the tool, target decision, validation and limitations. The
+[stage-two record](mbtx-stage-two.md) covers logical steps and request accounting.
 
 The initial foundation reserved directories using `.gitkeep` files. Stage one
-now activates the product extension, host bridge, fixtures and thin validation
-entry. The evaluator, analysis module and observability deployment remain
-reserved. Contracts beyond that documented executable subset remain planned.
+activated the product extension, host bridge, fixtures and thin validation
+entry. Stage two activates the shared MoonBit accounting package and its
+executable. The Rust evaluation adapter, task oracles, comparative reports and
+observability deployment remain planned.
 
 ## Contents
 
@@ -80,11 +82,12 @@ interfaces after an upstream update.
 | [OTel](../codex-rs/otel/README.md)                                                                                                            | Log, trace, and metric export plus session telemetry.                                            | Extend existing instrumentation and export to a local collector.                                           |
 | [Responses API proxy](../codex-rs/responses-api-proxy/README.md)                                                                              | A constrained OpenAI forwarding service.                                                         | Inspect reuse opportunities; arbitrary relay routing and account-wide pacing are not assumed capabilities. |
 
-Two integration gaps are already visible. `ToolCall` does not directly expose a
-complete policy-aware process capability, cancellation token, or reap service.
-An extension cannot preserve execution semantics merely by spawning its own
-process. Also, an `inference_call_id` identifies a request attempt, not a logical
-agent round. Neither gap is solved by directory scaffolding.
+Two integration boundaries require explicit implementation. Stage one supplies
+a bounded host execution capability rather than letting the extension bypass
+policy and sandbox services. Stage two associates `inference_call_id` request
+attempts with independently observed logical sampling rounds. Their current
+coverage is documented in the stage records; directory scaffolding alone does
+not establish either capability.
 
 ## Repository and package structure
 
@@ -103,8 +106,9 @@ codex-mbtx-runtime/
 │       ├── src/.gitkeep              # Reserved evaluation adapter sources
 │       └── tests/.gitkeep
 ├── mbtx/
-│   ├── evaluation/.gitkeep           # Reserved MoonBit analysis package
-│   ├── cmd/evaluation-model/.gitkeep # Reserved analysis executable
+│   ├── moon.mod                     # Shared MoonBit analysis module
+│   ├── evaluation/                  # Step analysis and coverage rules
+│   ├── cmd/evaluation-model/        # Structured JSON analysis executable
 │   ├── fixtures/                     # Fixed inputs and example programs
 │   ├── scripts/                      # Thin .mbtx automation
 │   ├── config/                       # Public templates, no credentials
@@ -122,7 +126,7 @@ documents in English and distinguish designed behavior from implemented behavior
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `codex-rs/ext/mbtx`, crate `codex-mbtx-extension`                 | Tool registration, input validation, program preparation, compiler invocation, cache decisions, and structured tool outcomes. Export installation/configuration and the smallest required host contract; keep implementation modules private. |
 | `codex-rs/mbtx-eval`, crate `codex-mbtx-eval`, binary `mbtx-eval` | Real Codex execution/replay, OS/HTTP observation, artifact persistence, native trace reduction, and report/OTLP adapters. It collects facts rather than deciding task correctness or statistical inclusion.                                   |
-| `mbtx/evaluation`, in one future MoonBit module rooted at `mbtx/` | Task definitions, oracle rules, failure attribution rules, step aggregation, comparability, statistics, and the report model. Start with one package and cohesive source files.                                                               |
+| `mbtx/evaluation`, in the MoonBit module rooted at `mbtx/` | Step aggregation and coverage rules are active. Task definitions, oracles, comparability, statistics, and comparative reporting are later additions to this shared package. |
 | `mbtx/cmd/evaluation-model`                                       | A small prebuilt executable exposing the evaluation package to the Rust CLI through a versioned structured stream. No duplicate analysis logic.                                                                                               |
 
 Add valid `Cargo.toml`, `BUILD.bazel`, workspace membership, `moon.mod`, and
@@ -469,7 +473,9 @@ Equal instrumentation is not proof of zero perturbation, especially when the
 arms emit different amounts of data. Keep exporter flush time distinct from
 task completion and bound shutdown. Step counts still require complete events.
 
-The proposed `mbtx-eval` CLI has four operations; none exists in the scaffold:
+The proposed `mbtx-eval` CLI has four operations; these remain future adapter
+work. Stage two supplies the narrower `evaluation-model` executable described
+in the [accounting guide](mbtx-stage-two.md):
 
 | Operation                                 | Contract                                                                                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -523,8 +529,8 @@ second unchanged bundle preparation must reuse completed artifacts.
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Foundation                    | Completed: architecture and directory reservations.                                                                                                                                                                                                                       |
 | Capability prototype and tool | Completed: unmodified baseline build and native/Wasm target comparison on macOS; bounded tool validation on macOS ARM64 and Linux x86_64. The [stage-one record](mbtx-stage-one.md#linux-validation-record) preserves the Linux transcript, coverage and evidence limits. |
-| Step identity                 | Add only missing logical-round associations. Hand-check multiple tools per response, final answer, 429/retry, partial stream with side effects, interruption, compaction, resume, and repair labeling. Trace reduction reproduces expected counts without double counting. |
-| Evaluation and observation    | Activate the adapter and MoonBit module; validate deterministic oracles, request pacing, immutable attempts, faults, missing data, HTML escaping, report reconstruction, SigNoz import, and build reuse.                                                                   |
+| Step identity                 | Implemented: native logical-round associations, HTTP sends, MoonBit accounting and fixed replay. The [stage-two record](mbtx-stage-two.md) documents validation, request coverage and Linux verification still to be performed by the user. |
+| Evaluation and observation    | Extend the active MoonBit accounting package and activate the adapter; validate task oracles, request pacing, immutable attempts, faults, HTML escaping, comparative report reconstruction, SigNoz import, and build reuse. |
 | Code delivery                 | Ship reviewed implementation, scoped tests, fixed replay, fixtures, configuration, and runnable collection guidance. Record any unresolved platform boundary.                                                                                                              |
 | Research acceptance           | After user-run Linux data returns, assess completeness, failure populations, uncertainty, and conclusions. No benefit claim or default switch before evidence.                                                                                                             |
 
@@ -533,7 +539,7 @@ relevant prototype before depending on it:
 
 | Decision                                          | Required evidence                                                                                                                    |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Logical-step instrumentation placement            | Inspect loop/transport retries and verify accepted-response counts against fixed traces, including auxiliary work.                   |
+| Remaining request observation coverage            | Extend native request observation to WebSocket and auxiliary endpoints before claiming complete request totals for those transports. |
 | Relay adapter reuse                               | Confirm forwarding, complete-stream serialization, cooldown, cancellation, and real request counts with controlled endpoints.        |
 | Sample sizes and task budgets                     | Pilot task difficulty/request cost, then a frozen protocol and analysis plan; no outcome-based selection.                            |
 | Collector deployment and public artifact location | Demonstrate ingestion and standalone reconstruction while keeping credentials out of published data.                                 |

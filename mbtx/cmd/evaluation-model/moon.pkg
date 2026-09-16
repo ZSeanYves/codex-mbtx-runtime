@@ -1,0 +1,9 @@
+import {
+  "ZSeanYves/codex-mbtx-runtime/evaluation",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+
+pkgtype(kind: "executable")
