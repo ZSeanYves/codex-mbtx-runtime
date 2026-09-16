@@ -48,7 +48,6 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
-use codex_rollout_trace::InferenceTraceContext;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::truncate_text;
@@ -760,6 +759,15 @@ async fn drain_to_completed(
     responses_metadata: &CodexResponsesMetadata,
     prompt: &Prompt,
 ) -> CodexResult<String> {
+    let inference_trace = sess
+        .services
+        .rollout_thread_trace
+        .inference_trace_context(
+            &turn_context.sub_id,
+            turn_context.model_info().slug.as_str(),
+            turn_context.provider.info().name.as_str(),
+        )
+        .with_purpose(codex_rollout_trace::RequestPurpose::Compaction);
     let mut stream = client_session
         .stream(
             prompt,
@@ -773,9 +781,7 @@ async fn drain_to_completed(
             turn_context.reasoning_summary(),
             turn_context.config.service_tier.clone(),
             responses_metadata,
-            // Rollout tracing currently models remote compaction only; local compaction streams
-            // are left untraced until the reducer has a first-class local compaction lifecycle.
-            &InferenceTraceContext::disabled(),
+            &inference_trace,
         )
         .await?;
     loop {

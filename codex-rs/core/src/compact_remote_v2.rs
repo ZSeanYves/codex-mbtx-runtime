@@ -369,6 +369,7 @@ async fn run_remote_compaction_request_v2(
     client_session: &mut ModelClientSession,
     prompt: &Prompt,
     responses_metadata: &CodexResponsesMetadata,
+    inference_trace: &InferenceTraceContext,
 ) -> CodexResult<RemoteCompactionV2Output> {
     let turn_context = &step_context.turn;
     let max_retries = turn_context
@@ -391,7 +392,7 @@ async fn run_remote_compaction_request_v2(
                 turn_context.reasoning_summary(),
                 step_context.settings.service_tier.clone(),
                 responses_metadata,
-                &InferenceTraceContext::disabled(),
+                inference_trace,
             )
             .await
         {

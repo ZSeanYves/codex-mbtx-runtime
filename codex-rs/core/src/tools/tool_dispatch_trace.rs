@@ -28,6 +28,12 @@ impl ToolDispatchTrace {
             .services
             .rollout_thread_trace
             .start_tool_dispatch_trace(|| tool_dispatch_invocation(invocation));
+        if context.is_enabled() {
+            invocation
+                .step_context
+                .agent_step
+                .record_tool_dispatch(&invocation.call_id);
+        }
         Self { context }
     }
 

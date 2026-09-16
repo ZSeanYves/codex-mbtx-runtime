@@ -3864,6 +3864,7 @@ impl Session {
         .or_cancel(cancellation_token)
         .await??;
         Ok(Arc::new(StepContext {
+            agent_step: codex_rollout_trace::AgentStepContext::default(),
             settings,
             token_budget,
             session_telemetry,

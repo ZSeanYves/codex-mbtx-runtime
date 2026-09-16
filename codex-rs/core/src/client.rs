@@ -25,6 +25,8 @@
 //! WebSocket prewarm is treated as the first websocket connection attempt for a turn. If it
 //! fails, normal stream retry/fallback logic handles recovery on the same turn.
 
+mod request_trace;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -1578,6 +1580,10 @@ impl ModelClientSession {
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
             inference_trace_attempt.record_started(&request);
+            let request_telemetry = Arc::new(request_trace::TracedRequestTelemetry {
+                delegate: request_telemetry,
+                trace: inference_trace_attempt.http_trace_context(),
+            });
             let client = ApiResponsesClient::new(
                 transport,
                 client_setup.api_provider,

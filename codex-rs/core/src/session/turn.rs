@@ -1553,104 +1553,132 @@ async fn run_sampling_request(
     input: Vec<ResponseItem>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
-    let turn_context = Arc::clone(&step_context.turn);
-    let base_instructions = sess.get_prompt_base_instructions().await;
+    let step_guard = sess
+        .services
+        .rollout_thread_trace
+        .start_agent_step(&step_context.turn.sub_id);
+    let step_context = Arc::new(StepContext {
+        agent_step: step_guard.context(),
+        ..step_context.as_ref().clone()
+    });
+    let result = async {
+        let turn_context = Arc::clone(&step_context.turn);
+        let base_instructions = sess.get_prompt_base_instructions().await;
 
-    let tool_runtime = ToolCallRuntime::new(
-        Arc::clone(&sess),
-        Arc::clone(&step_context),
-        Arc::clone(&turn_diff_tracker),
-    );
-    let _code_mode_worker = sess.services.code_mode_service.start_turn_worker(
-        &sess,
-        Arc::clone(&step_context),
-        Arc::clone(&turn_diff_tracker),
-    );
-    let max_retries = turn_context.provider.info().stream_max_retries();
-    let mut retry_state = ResponsesStreamRetryState::default();
-    let mut initial_input = Some(input);
-    let mut original_input = None;
-    let mut executed_tool_calls_by_output = HashMap::new();
-    loop {
-        // Running code-mode cells can request review while this response is in flight.
-        // Keep the latest received ID until response.created replaces it.
-        let prompt_input = if let Some(input) = initial_input.take() {
-            input
-        } else {
-            sess.clone_history()
-                .await
-                .for_prompt(&step_context.settings.model_info.input_modalities)
-        };
-        let mut prompt_input = prompt_input;
-        sess.services
-            .executed_tool_calls
-            .attach_to_prompt(&mut prompt_input, &mut executed_tool_calls_by_output);
-        let prompt = build_prompt(
-            prompt_input,
-            step_context.as_ref(),
-            base_instructions.clone(),
-        );
-        if crate::guardian::is_basic_session_source(&turn_context.session_source) {
-            crate::guardian::check_guardian_prompt_budget(
-                &sess,
-                &prompt,
-                &turn_context.config,
-                &step_context.settings.model_info,
-                responses_metadata,
-            )?;
-        }
-        let err = match try_run_sampling_request(
-            tool_runtime.clone(),
+        let tool_runtime = ToolCallRuntime::new(
             Arc::clone(&sess),
             Arc::clone(&step_context),
-            Arc::clone(&turn_store),
-            client_session,
-            responses_metadata,
             Arc::clone(&turn_diff_tracker),
-            &prompt,
-            cancellation_token.child_token(),
-        )
-        .await
-        {
-            Ok(output) => {
-                return Ok((output, original_input.unwrap_or(prompt.input)));
-            }
-            Err(err) => match err.details() {
-                CodexErrorDetails::ContextWindowExceeded => {
-                    sess.set_total_tokens_full(&turn_context).await;
-                    return Err(err);
-                }
-                CodexErrorDetails::UsageLimitReached(e) => {
-                    let rate_limits = e.rate_limits.clone();
-                    if let Some(rate_limits) = rate_limits {
-                        sess.update_rate_limits(&turn_context, *rate_limits).await;
-                    }
-                    return Err(err);
-                }
-                _ => err,
-            },
-        };
-
-        if original_input.is_none() {
-            original_input = Some(prompt.input);
-        }
-
-        if !err.is_retryable() {
-            return Err(err);
-        }
-
-        handle_retryable_response_stream_error(
-            &mut retry_state,
-            max_retries,
-            err,
-            client_session,
+        );
+        let _code_mode_worker = sess.services.code_mode_service.start_turn_worker(
             &sess,
-            &turn_context,
-            ResponsesStreamRequest::Sampling,
-        )
-        .await?;
-        turn_context.turn_timing_state.record_sampling_retry();
+            Arc::clone(&step_context),
+            Arc::clone(&turn_diff_tracker),
+        );
+        let max_retries = turn_context.provider.info().stream_max_retries();
+        let mut retry_state = ResponsesStreamRetryState::default();
+        let mut initial_input = Some(input);
+        let mut original_input = None;
+        let mut executed_tool_calls_by_output = HashMap::new();
+        loop {
+            // Running code-mode cells can request review while this response is in flight.
+            // Keep the latest received ID until response.created replaces it.
+            let prompt_input = if let Some(input) = initial_input.take() {
+                input
+            } else {
+                sess.clone_history()
+                    .await
+                    .for_prompt(&step_context.settings.model_info.input_modalities)
+            };
+            let mut prompt_input = prompt_input;
+            sess.services
+                .executed_tool_calls
+                .attach_to_prompt(&mut prompt_input, &mut executed_tool_calls_by_output);
+            let prompt = build_prompt(
+                prompt_input,
+                step_context.as_ref(),
+                base_instructions.clone(),
+            );
+            if crate::guardian::is_basic_session_source(&turn_context.session_source) {
+                crate::guardian::check_guardian_prompt_budget(
+                    &sess,
+                    &prompt,
+                    &turn_context.config,
+                    &step_context.settings.model_info,
+                    responses_metadata,
+                )?;
+            }
+            let err = match try_run_sampling_request(
+                tool_runtime.clone(),
+                Arc::clone(&sess),
+                Arc::clone(&step_context),
+                Arc::clone(&turn_store),
+                client_session,
+                responses_metadata,
+                Arc::clone(&turn_diff_tracker),
+                &prompt,
+                cancellation_token.child_token(),
+            )
+            .await
+            {
+                Ok(output) => {
+                    return Ok((output, original_input.unwrap_or(prompt.input)));
+                }
+                Err(err) => match err.details() {
+                    CodexErrorDetails::ContextWindowExceeded => {
+                        sess.set_total_tokens_full(&turn_context).await;
+                        return Err(err);
+                    }
+                    CodexErrorDetails::UsageLimitReached(e) => {
+                        let rate_limits = e.rate_limits.clone();
+                        if let Some(rate_limits) = rate_limits {
+                            sess.update_rate_limits(&turn_context, *rate_limits).await;
+                        }
+                        return Err(err);
+                    }
+                    _ => err,
+                },
+            };
+
+            if original_input.is_none() {
+                original_input = Some(prompt.input);
+            }
+
+            if !err.is_retryable() {
+                return Err(err);
+            }
+
+            handle_retryable_response_stream_error(
+                &mut retry_state,
+                max_retries,
+                err,
+                client_session,
+                &sess,
+                &turn_context,
+                ResponsesStreamRequest::Sampling,
+            )
+            .await?;
+            turn_context.turn_timing_state.record_sampling_retry();
+        }
     }
+    .await;
+    match &result {
+        Ok(_) => step_context.agent_step.finish(
+            codex_rollout_trace::StepOutcome::Preempted,
+            /*response_id*/ None,
+            Some("sampling returned without an accepted response"),
+        ),
+        Err(error) => step_context.agent_step.finish(
+            if matches!(error.details(), CodexErrorDetails::TurnAborted) {
+                codex_rollout_trace::StepOutcome::Cancelled
+            } else {
+                codex_rollout_trace::StepOutcome::Failed
+            },
+            /*response_id*/ None,
+            Some(&error.to_string()),
+        ),
+    }
+    result
 }
 
 pub(crate) struct PreparedToolRecommendations {
@@ -2432,11 +2460,15 @@ async fn try_run_sampling_request(
         auth_mode = sess.services.auth_manager.auth_mode(),
         features = sess.features.enabled_features(),
     );
-    let inference_trace = sess.services.rollout_thread_trace.inference_trace_context(
-        turn_context.sub_id.as_str(),
-        step_context.settings.model_info.slug.as_str(),
-        turn_context.provider.info().name.as_str(),
-    );
+    let inference_trace = sess
+        .services
+        .rollout_thread_trace
+        .inference_trace_context(
+            turn_context.sub_id.as_str(),
+            step_context.settings.model_info.slug.as_str(),
+            turn_context.provider.info().name.as_str(),
+        )
+        .with_agent_step(step_context.agent_step.clone());
     let sampling_timing_guard = turn_context.turn_timing_state.begin_sampling();
     let uses_sequential_cutoff_reasoning_summaries = turn_context
         .config
@@ -2542,6 +2574,7 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::OutputItemDone(mut item) => {
+                step_context.agent_step.record_output_item(&item);
                 assign_missing_streamed_response_item_id(&mut item, active_item.as_ref());
                 if analytics_tool_call_ids.len() < MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE {
                     let call_id = match &item {
@@ -2828,6 +2861,11 @@ async fn try_run_sampling_request(
                 if let Err(err) = budget_result {
                     break Err(err);
                 }
+                step_context.agent_step.finish(
+                    codex_rollout_trace::StepOutcome::Accepted,
+                    Some(&response_id),
+                    /*reason*/ None,
+                );
                 if let Some(false) = end_turn {
                     needs_follow_up = true;
                 }

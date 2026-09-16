@@ -73,6 +73,7 @@ mod external_auth;
 mod fork_thread;
 mod git_enrichment;
 mod guardian_authorization;
+mod step_accounting;
 // Uses the same command-approval harness as guardian_review below.
 #[cfg(not(target_os = "windows"))]
 mod guardian_context_budget;

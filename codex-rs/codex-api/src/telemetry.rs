@@ -82,6 +82,9 @@ where
         let telemetry = telemetry.clone();
         let send = send.clone();
         async move {
+            if let Some(t) = telemetry.as_ref() {
+                t.on_request_start(attempt);
+            }
             let start = Instant::now();
             let result = send(req).await;
             if let Some(t) = telemetry.as_ref() {

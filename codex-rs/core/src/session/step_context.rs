@@ -16,7 +16,9 @@ use codex_protocol::items::ModelInvocationContext;
 use codex_protocol::protocol::TurnContextItem;
 
 /// Request-scoped state that may change between model sampling requests.
+#[derive(Clone)]
 pub(crate) struct StepContext {
+    pub(crate) agent_step: codex_rollout_trace::AgentStepContext,
     pub(crate) turn: Arc<TurnContext>,
     /// One immutable settings version captured before request preparation.
     pub(crate) settings: Arc<ResolvedStepSettings>,

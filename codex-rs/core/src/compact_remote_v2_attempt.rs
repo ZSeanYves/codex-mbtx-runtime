@@ -107,6 +107,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         client_session,
         &prompt,
         &responses_metadata,
+        &trace_attempt.inference_trace_context(),
     )
     .await;
     trace_attempt.record_result(
