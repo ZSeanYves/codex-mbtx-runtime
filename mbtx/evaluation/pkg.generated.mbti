@@ -2,7 +2,19 @@
 package "ZSeanYves/codex-mbtx-runtime/evaluation"
 
 // Values
+pub fn analyze_attempt(Json, Json) -> Json raise
+
+pub fn analyze_experiment(Json, Array[Json]) -> Json raise
+
 pub fn analyze_steps(Json) -> Json raise
+
+pub fn collection_gate(Array[Json]) -> Json
+
+pub fn evaluate_request(Json) -> Json raise
+
+pub fn pilot_protocol() -> Json
+
+pub fn task_oracle(Json, Json) -> Json raise
 
 // Errors
 

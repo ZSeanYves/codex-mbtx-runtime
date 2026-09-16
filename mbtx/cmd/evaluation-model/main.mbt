@@ -1,6 +1,19 @@
 ///|
 async fn main {
   let args = @env.args()
+  if args.length() == 2 && args[1] == "--worker" {
+    while @stdio.stdin.read_until("\n") is Some(line) {
+      let response = try {
+        let result = @evaluation.evaluate_request(@json.parse(line))
+        Json::object({ "ok": true, "result": result })
+      } catch {
+        error =>
+          Json::object({ "ok": false, "error": error.to_string().to_json() })
+      }
+      @stdio.stdout.write(response.stringify() + "\n")
+    }
+    return
+  }
   guard args.length() == 2 || args.length() == 3 else {
     fail("Usage: evaluation-model REDUCED_STATE.json [EXPECTED_COUNTS.json]")
   }
