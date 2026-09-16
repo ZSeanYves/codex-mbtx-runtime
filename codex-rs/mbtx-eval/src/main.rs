@@ -12,6 +12,8 @@ mod observe;
 mod replay;
 mod report;
 mod request_contract;
+mod submission;
+mod validation_process;
 mod workspace;
 
 use anyhow::Context;

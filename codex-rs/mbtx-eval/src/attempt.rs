@@ -176,6 +176,29 @@ impl Execution<'_> {
             &directory.join("snapshot.json"),
             &snapshot(&workspace, task)?,
         )?;
+        if task["acceptance"] == "programs" {
+            let validator = crate::submission::Validator {
+                bundle,
+                bundle_info,
+                path: manifest["path"].as_str().context("recorded PATH")?,
+            };
+            let validation = match validator
+                .validate(
+                    task,
+                    &route.arm,
+                    &workspace,
+                    &root.join("workspaces").join(format!("{id}-validation")),
+                    &directory.join("submission"),
+                )
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    json!({"status":"harness_error","error":error.to_string(),"cases":null})
+                }
+            };
+            json_new(&directory.join("submission.json"), &validation)?;
+        }
         seal(directory)?;
         ensure!(
             termination != "cancelled",
