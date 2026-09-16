@@ -172,6 +172,21 @@ impl CompactionTraceContext {
 }
 
 impl CompactionTraceAttempt {
+    /// Associate concrete sends with this compaction lifecycle without counting it twice.
+    pub fn inference_trace_context(&self) -> crate::InferenceTraceContext {
+        let CompactionTraceAttemptState::Enabled(attempt) = &self.state else {
+            return crate::InferenceTraceContext::disabled();
+        };
+        crate::InferenceTraceContext::enabled(
+            Arc::clone(&attempt.context.writer),
+            attempt.context.thread_id.clone(),
+            attempt.context.codex_turn_id.clone(),
+            attempt.context.model.clone(),
+            attempt.context.provider_name.clone(),
+        )
+        .with_compaction_request(attempt.compaction_request_id.clone())
+    }
+
     /// Builds an attempt that records nothing.
     fn disabled() -> Self {
         Self {

@@ -6,9 +6,11 @@
 //!
 //! See `README.md` for the system diagram and reducer model.
 
+mod agent_step;
 mod bundle;
 mod code_cell;
 mod compaction;
+mod http_request;
 mod inference;
 mod mcp;
 mod model;
@@ -20,6 +22,12 @@ mod thread;
 mod tool_dispatch;
 mod writer;
 
+pub use agent_step::AgentStepContext;
+pub use agent_step::AgentStepGuard;
+pub use agent_step::RecordedStepEvent;
+pub use agent_step::RequestPurpose;
+pub use agent_step::StepObservation;
+pub use agent_step::StepOutcome;
 /// Conventional reduced-state cache name written next to a raw trace bundle.
 pub use bundle::REDUCED_STATE_FILE_NAME;
 /// No-op-capable handle for recording one code-mode runtime cell.
@@ -30,6 +38,7 @@ pub use compaction::CompactionCheckpointTracePayload;
 pub use compaction::CompactionTraceAttempt;
 /// Shared recorder context for a compaction checkpoint.
 pub use compaction::CompactionTraceContext;
+pub use http_request::HttpRequestTraceContext;
 /// No-op-capable handle for recording one upstream inference attempt.
 pub use inference::InferenceTraceAttempt;
 /// Shared recorder context for inference attempts within one Codex turn.

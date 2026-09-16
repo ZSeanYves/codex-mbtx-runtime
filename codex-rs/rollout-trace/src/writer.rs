@@ -66,7 +66,7 @@ impl TraceWriter {
 
         let event_log_path = bundle_dir.join(RAW_EVENT_LOG_FILE_NAME);
         let event_log = OpenOptions::new()
-            .create(true)
+            .create_new(true)
             .append(true)
             .open(&event_log_path)
             .with_context(|| format!("open trace event log {}", event_log_path.display()))?;
@@ -142,7 +142,11 @@ impl TraceWriter {
 }
 
 fn write_json_file(path: &Path, value: &impl Serialize) -> Result<()> {
-    let file = File::create(path).with_context(|| format!("create {}", path.display()))?;
+    let file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .with_context(|| format!("create new {}", path.display()))?;
     serde_json::to_writer_pretty(file, value)
         .with_context(|| format!("write JSON {}", path.display()))
 }

@@ -372,6 +372,20 @@ impl ThreadTraceContext {
         )
     }
 
+    /// Start one task-loop round. Auxiliary sampling does not call this method.
+    pub fn start_agent_step(&self, codex_turn_id: &str) -> crate::AgentStepGuard {
+        let ThreadTraceContextState::Enabled(context) = &self.state else {
+            return crate::AgentStepGuard::disabled();
+        };
+        crate::AgentStepGuard::start(
+            Arc::clone(&context.writer),
+            RawTraceEventContext {
+                thread_id: Some(context.thread_id.clone()),
+                codex_turn_id: Some(codex_turn_id.to_string()),
+            },
+        )
+    }
+
     /// Builds remote-compaction trace context for one checkpoint.
     ///
     /// Rollout tracing currently has a first-class checkpoint model only for remote compaction.

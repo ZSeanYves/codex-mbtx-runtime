@@ -68,14 +68,34 @@ pub fn replay_bundle(bundle_dir: impl AsRef<Path>) -> Result<RolloutTrace> {
     let event_log_path = bundle_dir.join(RAW_EVENT_LOG_FILE_NAME);
     let event_log = File::open(&event_log_path)
         .with_context(|| format!("open trace event log {}", event_log_path.display()))?;
-    for (line_index, line) in BufReader::new(event_log).lines().enumerate() {
-        let line = line.with_context(|| format!("read trace event line {}", line_index + 1))?;
-        if line.trim().is_empty() {
+    let mut reader = BufReader::new(event_log);
+    let mut line = Vec::new();
+    let mut expected_seq = 1;
+    while reader.read_until(b'\n', &mut line)? != 0 {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            line.clear();
             continue;
         }
-        let event: RawTraceEvent = serde_json::from_str(&line)
-            .with_context(|| format!("parse trace event line {}", line_index + 1))?;
+        let event: RawTraceEvent = match serde_json::from_slice(&line) {
+            Ok(event) => event,
+            Err(_) if !line.ends_with(b"\n") => {
+                reducer
+                    .rollout
+                    .replay_warnings
+                    .push("incomplete final event; replayed the intact prefix".to_string());
+                break;
+            }
+            Err(error) => return Err(error).context("parse complete trace event"),
+        };
+        if event.seq != expected_seq {
+            bail!(
+                "trace sequence gap or duplicate: expected {expected_seq}, observed {}",
+                event.seq
+            );
+        }
+        expected_seq += 1;
         reducer.apply_event(event)?;
+        line.clear();
     }
     // Spawn edges prefer the child task message as their target, but a child can
     // fail before that message is ever reduced. Only after replaying the whole
@@ -155,6 +175,14 @@ impl TraceReducer {
         }
 
         match event.payload {
+            RawTraceEventPayload::StepObserved { observation } => {
+                self.rollout.step_events.push(crate::RecordedStepEvent {
+                    seq: event.seq,
+                    thread_id: event.thread_id,
+                    codex_turn_id: event.codex_turn_id,
+                    observation,
+                });
+            }
             RawTraceEventPayload::RolloutStarted {
                 trace_id,
                 root_thread_id,

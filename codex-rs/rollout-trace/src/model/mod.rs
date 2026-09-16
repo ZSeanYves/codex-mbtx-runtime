@@ -55,6 +55,12 @@ pub type CorrelationId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RolloutTrace {
     pub schema_version: u32,
+    /// Loop/request facts, with raw sequence references; absent in older captures.
+    #[serde(default)]
+    pub step_events: Vec<crate::RecordedStepEvent>,
+    /// Explicit evidence limitations discovered while reading the raw bundle.
+    #[serde(default)]
+    pub replay_warnings: Vec<String>,
     /// Unique identity for this trace capture.
     ///
     /// `rollout_id` names the Codex rollout/session being observed. `trace_id`
@@ -100,6 +106,8 @@ impl RolloutTrace {
     ) -> Self {
         Self {
             schema_version,
+            step_events: Vec::new(),
+            replay_warnings: Vec::new(),
             trace_id,
             rollout_id,
             started_at_unix_ms,

@@ -51,6 +51,9 @@ struct EnabledInferenceTraceContext {
     codex_turn_id: CodexTurnId,
     model: String,
     provider_name: String,
+    step: crate::AgentStepContext,
+    purpose: crate::RequestPurpose,
+    compaction_request_id: Option<String>,
 }
 
 /// One concrete upstream request attempt.
@@ -114,8 +117,36 @@ impl InferenceTraceContext {
                 codex_turn_id,
                 model,
                 provider_name,
+                step: crate::AgentStepContext::default(),
+                purpose: crate::RequestPurpose::Auxiliary,
+                compaction_request_id: None,
             }),
         }
+    }
+
+    /// Bind transport attempts to an independently observed task-loop round.
+    pub fn with_agent_step(mut self, step: crate::AgentStepContext) -> Self {
+        if let InferenceTraceContextState::Enabled(context) = &mut self.state {
+            context.step = step;
+            context.purpose = crate::RequestPurpose::Task;
+        }
+        self
+    }
+
+    /// Label non-task sampling without creating a logical task round.
+    pub fn with_purpose(mut self, purpose: crate::RequestPurpose) -> Self {
+        if let InferenceTraceContextState::Enabled(context) = &mut self.state {
+            context.purpose = purpose;
+        }
+        self
+    }
+
+    pub(crate) fn with_compaction_request(mut self, request_id: String) -> Self {
+        if let InferenceTraceContextState::Enabled(context) = &mut self.state {
+            context.purpose = crate::RequestPurpose::Compaction;
+            context.compaction_request_id = Some(request_id);
+        }
+        self
     }
 
     /// Starts a new attempt after the concrete provider request has been built.
@@ -175,6 +206,18 @@ impl InferenceTraceAttempt {
         let InferenceTraceAttemptState::Enabled(attempt) = &self.state else {
             return;
         };
+        crate::agent_step::record(
+            &attempt.context.writer,
+            &RawTraceEventContext {
+                thread_id: Some(attempt.context.thread_id.clone()),
+                codex_turn_id: Some(attempt.context.codex_turn_id.clone()),
+            },
+            crate::StepObservation::InferenceLinked {
+                step_id: attempt.context.step.id().map(str::to_string),
+                inference_call_id: attempt.inference_call_id.clone(),
+                purpose: attempt.context.purpose,
+            },
+        );
         let Some(request_payload) = write_json_payload_best_effort(
             &attempt.context.writer,
             RawPayloadKind::InferenceRequest,
@@ -194,6 +237,24 @@ impl InferenceTraceAttempt {
                 request_payload,
             },
         );
+    }
+
+    /// Observe wire sends separately from this higher-level inference attempt.
+    pub fn http_trace_context(&self) -> crate::HttpRequestTraceContext {
+        let InferenceTraceAttemptState::Enabled(attempt) = &self.state else {
+            return crate::HttpRequestTraceContext::default();
+        };
+        crate::HttpRequestTraceContext::new(
+            Arc::clone(&attempt.context.writer),
+            RawTraceEventContext {
+                thread_id: Some(attempt.context.thread_id.clone()),
+                codex_turn_id: Some(attempt.context.codex_turn_id.clone()),
+            },
+            Some(attempt.inference_call_id.clone()),
+            attempt.context.compaction_request_id.clone(),
+            attempt.context.step.id().map(str::to_string),
+            attempt.context.purpose,
+        )
     }
 
     /// Records successful provider completion and serializes the observed output items.
