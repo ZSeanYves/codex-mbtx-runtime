@@ -1,0 +1,393 @@
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::time::Duration;
+
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::ensure;
+use clap::Args;
+use serde_json::Value;
+use serde_json::json;
+
+use crate::analysis::Analysis;
+use crate::attempt::Execution;
+use crate::bundle;
+use crate::config::RelayConfig;
+use crate::evidence::json_new;
+use crate::evidence::now_ms;
+use crate::evidence::read_json;
+use crate::evidence::safe_relative;
+use crate::evidence::seal;
+use crate::evidence::write_new;
+use crate::gate::Gate;
+use crate::gate::Route;
+use crate::replay;
+use crate::report;
+
+#[derive(Args)]
+pub(crate) struct RunArgs {
+    #[arg(long)]
+    pub bundle: PathBuf,
+    #[arg(long)]
+    pub output: PathBuf,
+    #[arg(long, value_parser=["replay","relay"],default_value="replay")]
+    pub mode: String,
+    #[arg(long, default_value = "mbtx/config/relay.toml")]
+    pub config: PathBuf,
+    #[arg(long)]
+    pub credentials_file: Option<PathBuf>,
+    #[arg(long, default_value_t = 1)]
+    pub repeats: usize,
+    #[arg(long, default_value_t = 20260916)]
+    pub seed: u64,
+    #[arg(long, default_value_t = 15000)]
+    pub min_interval_ms: u64,
+    #[arg(long, value_delimiter = ',')]
+    pub tasks: Vec<String>,
+    #[arg(long)]
+    pub resume: bool,
+    #[arg(long)]
+    pub replay_source: Option<PathBuf>,
+    /// Controlled offline failure; never combined with a real provider.
+    #[arg(long,value_parser=["429","500","disconnect","truncated","stall"],conflicts_with="replay_source")]
+    pub replay_fault: Option<String>,
+}
+
+fn schedule(tasks: &[Value], repeats: usize, seed: u64) -> Vec<Value> {
+    let mut order: Vec<_> = (0..tasks.len()).collect();
+    let mut state = seed;
+    for i in (1..order.len()).rev() {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        order.swap(i, (state % (i as u64 + 1)) as usize);
+    }
+    let mut pairs = Vec::new();
+    for repeat in 0..repeats {
+        for &index in &order {
+            let n = pairs.len();
+            pairs.push(json!({"pair_id":format!("pair-{n:04}"),"task_id":tasks[index]["id"],"repeat":repeat,"arms":if n%2==0 { ["shell_tool","mbtx_program"] } else { ["mbtx_program","shell_tool"] }}));
+        }
+    }
+    pairs
+}
+
+fn route(
+    directory: PathBuf,
+    arm: &str,
+    replies: Option<Vec<replay::Reply>>,
+    budget: usize,
+) -> Result<Route> {
+    for child in ["http", "otel", "trace"] {
+        fs::create_dir(directory.join(child))?;
+    }
+    Ok(Route {
+        directory,
+        arm: arm.into(),
+        token: uuid::Uuid::new_v4().to_string(),
+        replies,
+        active: AtomicBool::new(true),
+        budget_exhausted: AtomicBool::new(false),
+        requests: AtomicUsize::new(0),
+        otel_requests: AtomicUsize::new(0),
+        request_budget: budget,
+        observation_failures: AtomicUsize::new(0),
+        closed: tokio::sync::Notify::new(),
+        otel_write: std::sync::Mutex::new(()),
+    })
+}
+
+pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
+    ensure!(
+        cfg!(unix),
+        "pilot collection currently supports Linux and macOS only"
+    );
+    ensure!(
+        (1..=20).contains(&args.repeats),
+        "pilot repeats must be 1..20; a formal protocol is not yet frozen"
+    );
+    ensure!(
+        args.mode != "relay" || args.min_interval_ms >= 15000,
+        "relay start interval must be at least 15000 ms"
+    );
+    ensure!(
+        args.mode == "replay" || (args.replay_fault.is_none() && args.replay_source.is_none()),
+        "recorded responses and fault injection require replay mode"
+    );
+    let bundle = args.bundle.canonicalize()?;
+    let bundle_info = bundle::verify(&bundle)?;
+    let config = RelayConfig::load(&args.config)?;
+    let key = if args.mode == "relay" {
+        config.credential(args.credentials_file.as_deref())?
+    } else {
+        String::new()
+    };
+    // Refuse a second evaluator on this host using the same account. Other
+    // applications remain outside our control. The lock contains no credential.
+    let account_lock = if args.mode == "relay" {
+        let cache = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .context("HOME required for relay account lock")?
+            .join(".cache/mbtx-eval");
+        fs::create_dir_all(&cache)?;
+        let name =
+            crate::evidence::digest(format!("{}:{key}", config.provider()?.base_url).as_bytes());
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(cache.join(format!("{name}.lock")))?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            ensure!(
+                unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+                "another evaluator on this host is using this relay account"
+            );
+        }
+        Some(file)
+    } else {
+        None
+    };
+    let mut analysis = Analysis::start(&bundle).await?;
+    let protocol = analysis.query(json!({"op":"protocol"})).await?;
+    if let Some(source) = &args.replay_source {
+        ensure!(
+            crate::evidence::verify_manifest(source)?,
+            "recorded source manifest or fixture changed"
+        );
+        ensure!(
+            read_json(&source.join("run.json"))?["protocol"] == protocol,
+            "recorded replay requires the original task and observation protocol"
+        );
+    }
+    let mut tasks = protocol["tasks"]
+        .as_array()
+        .context("protocol tasks")?
+        .clone();
+    if !args.tasks.is_empty() {
+        ensure!(
+            args.tasks
+                .iter()
+                .all(|id| tasks.iter().any(|t| t["id"] == *id)),
+            "unknown task selection"
+        );
+        tasks.retain(|t| args.tasks.iter().any(|id| t["id"] == *id));
+    }
+    let expected_schedule = schedule(&tasks, args.repeats, args.seed);
+    let manifest = if args.resume {
+        let previous = read_json(&args.output.join("run.json"))?;
+        ensure!(
+            crate::evidence::verify_manifest(&args.output)?,
+            "run manifest or fixture manifest changed"
+        );
+        ensure!(
+            previous["bundle"] == bundle_info
+                && previous["config"] == serde_json::to_value(&config)?
+                && previous["mode"] == args.mode
+                && previous["min_interval_ms"] == args.min_interval_ms
+                && previous["schedule"] == json!(expected_schedule)
+                && previous["protocol"] == protocol
+                && previous["replay_fault"] == json!(args.replay_fault)
+                && previous["replay_source"] == json!(args.replay_source),
+            "resume requires the original bundle, protocol, configuration and schedule"
+        );
+        previous
+    } else {
+        fs::create_dir_all(args.output.parent().unwrap_or(Path::new(".")))?;
+        fs::create_dir(&args.output).context(
+            "run directory already exists; use --resume for unfinished schedule entries",
+        )?;
+        for name in ["attempts", "workspaces", "probes", "reports", "fixtures"] {
+            fs::create_dir(args.output.join(name))?;
+        }
+        for task in &tasks {
+            let directory = args
+                .output
+                .join("fixtures")
+                .join(task["id"].as_str().context("task id")?);
+            fs::create_dir(&directory)?;
+            for (path, content) in task["files"].as_object().context("fixture files")? {
+                let file = directory.join(safe_relative(path)?);
+                fs::create_dir_all(file.parent().context("fixture parent")?)?;
+                write_new(&file, content.as_str().context("fixture text")?.as_bytes())?;
+            }
+            seal(&directory)?;
+        }
+        let fixture_seals = crate::evidence::hashes(&args.output.join("fixtures"))?;
+        let manifest = json!({"schema_version":1,"run_id":uuid::Uuid::new_v4().to_string(),"created_ms":now_ms(),"mode":args.mode,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,"bundle":bundle_info,"protocol":protocol,"schedule":expected_schedule,"config":config,"min_interval_ms":args.min_interval_ms,"seed":args.seed,"path":std::env::var("PATH").unwrap_or_default(),"replay_source":args.replay_source,"replay_fault":args.replay_fault,"fixture_hashes":fixture_seals});
+        json_new(&args.output.join("run.json"), &manifest)?;
+        write_new(
+            &args.output.join("run.sha256"),
+            crate::evidence::digest(&fs::read(args.output.join("run.json"))?).as_bytes(),
+        )?;
+        manifest
+    };
+    let root = args.output.canonicalize()?;
+    // Exclusive run lock is an open-file flock, so SIGKILL does not leave a stale
+    // owner. The separate account lock also coordinates relay runs on this host.
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(root.join("collector.lock"))?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        ensure!(
+            unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+            "another collector owns this run"
+        );
+    }
+    let gate = Gate::start(
+        config.provider()?.base_url.clone(),
+        key,
+        Duration::from_millis(args.min_interval_ms),
+    )
+    .await?;
+    let execution = Execution {
+        root: &root,
+        bundle: &bundle,
+        bundle_info: &bundle_info,
+        config: &config,
+        manifest: &manifest,
+        gate: &gate,
+    };
+    let result = collect_schedule(&execution, &args, &mut analysis).await;
+    gate.stop().await;
+    json_new(
+        &root.join(format!("collection-session-{}.json", uuid::Uuid::new_v4())),
+        &json!({"ended_ms":now_ms(),"stop_reason":result.as_ref().copied().unwrap_or("collector_error"),"error":result.as_ref().err().map(ToString::to_string)}),
+    )?;
+    // Report whatever survived, including an incomplete attempt after an error.
+    let generated = report::generate(&root, &bundle, &mut analysis, "all").await;
+    result?;
+    generated?;
+    drop(account_lock);
+    Ok(root)
+}
+
+async fn collect_schedule(
+    execution: &Execution<'_>,
+    args: &RunArgs,
+    analysis: &mut Analysis,
+) -> Result<&'static str> {
+    let root = execution.root;
+    let config = execution.config;
+    let manifest = execution.manifest;
+    let gate = execution.gate;
+    if args.mode == "relay" && !args.resume && !probe(root, config, gate).await? {
+        return Ok("relay_probe_failed");
+    }
+    let mut completed = report::assess(root, analysis).await?;
+    let pairs = manifest["schedule"].as_array().context("schedule")?;
+    for pair in pairs {
+        let task = manifest["protocol"]["tasks"]
+            .as_array()
+            .context("tasks")?
+            .iter()
+            .find(|t| t["id"] == pair["task_id"])
+            .context("scheduled task")?;
+        for arm in pair["arms"].as_array().context("arms")? {
+            if completed
+                .iter()
+                .any(|a| a["pair_id"] == pair["pair_id"] && a["arm"] == *arm)
+            {
+                continue;
+            }
+            if analysis
+                .query(json!({"op":"gate","attempts":completed}))
+                .await?["pause"]
+                == true
+            {
+                return Ok("infrastructure_failure_gate");
+            }
+            let arm = arm.as_str().context("arm label")?;
+            let id = uuid::Uuid::new_v4().to_string();
+            let directory = root.join("attempts").join(&id);
+            fs::create_dir(&directory)?;
+            json_new(
+                &directory.join("assignment.json"),
+                &json!({"attempt_id":id,"pair_id":pair["pair_id"],"task_id":task["id"],"arm":arm,"assigned_ms":now_ms()}),
+            )?;
+            eprintln!(
+                "[eval] {}/{} arms; {} {arm} {}",
+                completed.len(),
+                pairs.len() * 2,
+                pair["pair_id"],
+                task["id"]
+            );
+            let replies = if let Some(source) = &args.replay_source {
+                let source_attempt = report::find_attempt(source, &pair["pair_id"], arm)?;
+                ensure!(
+                    crate::evidence::verify(&source_attempt)?,
+                    "replay source attempt is unsealed or changed"
+                );
+                Some(replay::recorded(&source_attempt)?)
+            } else if let Some(fault) = &args.replay_fault {
+                Some(vec![replay::fault(fault)])
+            } else if args.mode == "replay" {
+                Some(replay::fixed(task, arm)?)
+            } else {
+                None
+            };
+            let route = gate
+                .add(id.clone(), route(directory.clone(), arm, replies, 16)?)
+                .await;
+            if let Err(error) = execution.execute(task, &pair["pair_id"], &id, &route).await {
+                if !directory.join("seal.json").exists() {
+                    json_new(
+                        &directory.join("execution-error.json"),
+                        &json!({"error":error.to_string(),"wall_time_ms":now_ms()}),
+                    )?;
+                }
+                return Err(error);
+            }
+            let assessment = report::assess_attempt(&directory, manifest, analysis).await?;
+            eprintln!(
+                "[eval] {} status={} steps={}",
+                id, assessment["status"], assessment["accounting"]["metrics"]["agent_steps"]
+            );
+            completed.push(assessment);
+        }
+    }
+    Ok("schedule_finished")
+}
+
+async fn probe(root: &Path, config: &RelayConfig, gate: &Arc<Gate>) -> Result<bool> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(120))
+        .build()?;
+    for _ in 0..3 {
+        let id = format!("probe-{}", uuid::Uuid::new_v4());
+        let directory = root.join("probes").join(&id);
+        fs::create_dir(&directory)?;
+        let route = gate
+            .add(id.clone(), route(directory.clone(), "probe", None, 1)?)
+            .await;
+        let response=client.post(format!("{}/a/{id}/v1/responses",gate.endpoint)).bearer_auth(&route.token)
+            .json(&json!({"model":config.model,"stream":true,"store":false,"input":[{"role":"user","content":"Reply with OK."}]})).send().await;
+        let success = match response {
+            Ok(r) if r.status().is_success() => r
+                .text()
+                .await
+                .is_ok_and(|s| s.contains("response.completed")),
+            _ => false,
+        };
+        route.close();
+        tokio::time::timeout(Duration::from_secs(15), gate.drain())
+            .await
+            .context("probe stream failed to close")?;
+        seal(&directory)?;
+        eprintln!("[eval] relay probe success={success}");
+        if success {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
