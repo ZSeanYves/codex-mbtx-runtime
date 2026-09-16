@@ -89,15 +89,27 @@ impl RelayConfig {
     }
 }
 
+pub(crate) struct AttemptContext<'a> {
+    pub arm: &'a str,
+    pub endpoint: &'a str,
+    pub attempt_id: &'a str,
+    pub instructions: &'a str,
+    pub work: &'a Path,
+}
+
 pub(crate) fn child_config(
     config: &RelayConfig,
     bundle: &Path,
     bundle_info: &Value,
-    arm: &str,
-    endpoint: &str,
-    attempt_id: &str,
-    instructions: &str,
+    context: AttemptContext<'_>,
 ) -> Result<String> {
+    let AttemptContext {
+        arm,
+        endpoint,
+        attempt_id,
+        instructions,
+        work,
+    } = context;
     let provider = config.provider()?;
     let mbtx = arm == "mbtx_program";
     let mut value = toml::Table::new();
@@ -109,7 +121,6 @@ pub(crate) fn child_config(
             config.model_reasoning_effort.as_str(),
         ),
         ("approval_policy", "never"),
-        ("sandbox_mode", "workspace-write"),
         ("web_search", "disabled"),
         ("developer_instructions", instructions),
     ] {
@@ -168,9 +179,14 @@ pub(crate) fn child_config(
             ("memories", false),
         ]))?,
     );
+    value.insert("default_permissions".into(), "evaluation".into());
     value.insert(
-        "sandbox_workspace_write".into(),
-        toml::Value::try_from(BTreeMap::from([("network_access", false)]))?,
+        "permissions".into(),
+        crate::workspace::permissions(
+            work,
+            bundle,
+            Path::new(bundle_info["moon_home"].as_str().context("MoonBit root")?),
+        )?,
     );
     let moon = bundle_info["moon_path"]
         .as_str()

@@ -65,7 +65,30 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
         pending.join("codex"),
     )?;
     fs::copy(std::env::current_exe()?, pending.join("mbtx-eval"))?;
+    fs::copy(
+        repo.join("codex-rs/target/debug/mbtx-fixture-worker"),
+        pending.join("fixture-worker"),
+    )?;
     fs::copy(&moonrun, pending.join("moonrun"))?;
+    // Version resolution reads registry metadata even for a frozen build. Keep
+    // that metadata immutable without exposing the user's MoonBit credentials.
+    let registry = moon_home.join("registry/index");
+    for entry in WalkDir::new(&registry)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| e.file_name() != ".git")
+    {
+        let entry = entry?;
+        let target = pending
+            .join("moon-home/registry/index")
+            .join(entry.path().strip_prefix(&registry)?);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(target)?;
+        } else {
+            ensure!(entry.file_type().is_file(), "registry symlink");
+            fs::copy(entry.path(), target)?;
+        }
+    }
     fs::copy(
         repo.join("mbtx/_build/wasm/release/build/cmd/evaluation-model/evaluation-model.wasm"),
         pending.join("evaluation-model.wasm"),
@@ -130,7 +153,7 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
     Ok(())
 }
 
-pub(crate) fn verify(bundle: &Path) -> Result<Value> {
+pub(crate) fn verify_analysis(bundle: &Path) -> Result<Value> {
     let info = read_json(&bundle.join("bundle.json"))?;
     ensure!(info["schema_version"] == 1, "unsupported bundle schema");
     ensure!(
@@ -147,6 +170,11 @@ pub(crate) fn verify(bundle: &Path) -> Result<Value> {
         serde_json::to_value(actual)? == info["files"],
         "bundle hash mismatch"
     );
+    Ok(info)
+}
+
+pub(crate) fn verify(bundle: &Path) -> Result<Value> {
+    let info = verify_analysis(bundle)?;
     for (path, key) in [
         ("moon_path", "moon_sha256"),
         ("moonrun_path", "moonrun_sha256"),
@@ -165,3 +193,7 @@ pub(crate) fn verify(bundle: &Path) -> Result<Value> {
     );
     Ok(info)
 }
+
+#[cfg(test)]
+#[path = "bundle_tests.rs"]
+mod tests;

@@ -70,7 +70,17 @@ impl Execution<'_> {
                 fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
             }
         }
-        fs::copy(bundle.join("mbtx-eval"), workspace.join("fixture-worker"))?;
+        fs::copy(
+            bundle.join("fixture-worker"),
+            workspace.join("fixture-worker"),
+        )?;
+        let workspace_facts = crate::workspace::prepare(
+            &workspace,
+            &work.join("home"),
+            manifest["path"].as_str().context("recorded PATH")?,
+        )
+        .await?;
+        json_new(&directory.join("workspace.json"), &workspace_facts)?;
         let endpoint = format!("{}/a/{id}/v1", gate.endpoint);
         let instructions = manifest["protocol"]["instructions"]
             .as_str()
@@ -79,10 +89,13 @@ impl Execution<'_> {
             config,
             bundle,
             bundle_info,
-            &route.arm,
-            &endpoint,
-            id,
-            instructions,
+            crate::config::AttemptContext {
+                arm: &route.arm,
+                endpoint: &endpoint,
+                attempt_id: id,
+                instructions,
+                work: &work,
+            },
         )?;
         write_new(&work.join("codex-home/config.toml"), toml.as_bytes())?;
         write_new(&directory.join("effective-config.toml"), toml.as_bytes())?;
@@ -107,9 +120,10 @@ impl Execution<'_> {
             .env("CODEX_HOME", work.join("codex-home"))
             .env("TMPDIR", work.join("tmp"))
             .env(
-                "MOON_HOME",
+                "MOON_TOOLCHAIN_ROOT",
                 bundle_info["moon_home"].as_str().context("MoonBit root")?,
             )
+            .env("MOON_HOME", bundle.join("moon-home"))
             .env("MBTX_LOCAL_KEY", &route.token)
             .env("NO_PROXY", "127.0.0.1,localhost,::1")
             .env("no_proxy", "127.0.0.1,localhost,::1")
@@ -118,6 +132,7 @@ impl Execution<'_> {
             .stdout(fs::File::create(directory.join("codex.jsonl"))?)
             .stderr(fs::File::create(directory.join("codex.stderr"))?)
             .kill_on_drop(true);
+        crate::workspace::git_environment(&mut command, &workspace);
         #[cfg(unix)]
         command.process_group(0);
         let start = Instant::now();

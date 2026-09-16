@@ -12,6 +12,7 @@ mod observe;
 mod replay;
 mod report;
 mod request_contract;
+mod workspace;
 
 use anyhow::Context;
 use anyhow::Result;

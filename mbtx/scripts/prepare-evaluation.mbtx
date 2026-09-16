@@ -27,7 +27,7 @@ async fn main {
   if !@fs.exists(moon_root + "/cache/deps/v1/sources/moonbitlang/async/0.21.3/src/fs/moon.pkg") {
     @shell.Cmd("moon", ["build", "--target", "wasm", "--target-dir", root + "/_build/fixture-dependencies", "mbtx/fixtures/capabilities.mbtx"]).run()
   }
-  for folder in ["bin", "lib", "cache/deps/v1/sources"] {
+  for folder in ["bin", "lib", "cache/deps/v1/sources", "registry/index"] {
     @fs.walk(moon_root + "/" + folder, max_concurrency=1, (path, files) => {
       for name in files {
         let file = path + "/" + name
@@ -51,7 +51,7 @@ async fn main {
     @shell.Cmd("moon", ["build", "--target", "wasm", "--release", "cmd/evaluation-model"], cwd="mbtx").run()
     // Prepare the approved versioned imports before any measured invocation.
     @shell.Cmd("moon", ["build", "--target", "wasm", "--target-dir", root + "/_build/fixture-dependencies", "mbtx/fixtures/capabilities.mbtx"]).run()
-    @shell.Cmd("cargo", ["build", "--locked", "-p", "codex-cli", "--bin", "codex", "-p", "codex-mbtx-eval", "--bin", "mbtx-eval", "-j", "4"], cwd="codex-rs", env={"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_INCREMENTAL":"0"}).run()
+    @shell.Cmd("cargo", ["build", "--locked", "-p", "codex-cli", "--bin", "codex", "-p", "codex-mbtx-eval", "--bin", "mbtx-eval", "--bin", "mbtx-fixture-worker", "-j", "4"], cwd="codex-rs", env={"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_INCREMENTAL":"0"}).run()
     @shell.Cmd("codex-rs/target/debug/mbtx-eval", ["bundle", "--repo", root, "--output", bundle, "--fingerprint", fingerprint]).run()
   }
   @fs.write_file(root + "/_build/evaluation-bundle.txt", bundle + "\n")
