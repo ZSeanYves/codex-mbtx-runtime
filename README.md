@@ -2,7 +2,7 @@
 
 This fork studies task completion with a programmable MoonBit tool and a Shell tool control. The [MBTX architecture](docs/mbtx-architecture.md) describes the package boundaries, execution contract, step measurements, and implementation stages.
 
-The optional `mbtx` tool compiles and executes inline MoonBit programs through Codex's host policy and sandbox. See the [stage-one implementation and validation guide](docs/mbtx-stage-one.md) for configuration and supported boundaries, and the [stage-two accounting guide](docs/mbtx-stage-two.md) for logical decision steps, request attempts, and offline validation. Autonomous evaluation and comparative reports remain planned. The installation instructions below describe upstream Codex; build this fork from source to use MBTX.
+The optional `mbtx` tool compiles and executes inline MoonBit programs through Codex's host policy and sandbox. See the [stage-one guide](docs/mbtx-stage-one.md) for tool configuration, the [stage-two guide](docs/mbtx-stage-two.md) for native step accounting, and the [stage-three guide](docs/mbtx-stage-three.md) for the paced Linux pilot, offline replay, evidence reports and SigNoz import. Live comparative research conclusions await user-collected pilot evidence. The installation instructions below describe upstream Codex; build this fork from source to use MBTX.
 
 ---
 

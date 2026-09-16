@@ -1,0 +1,25 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+
+async fn main {
+  let event = @json.parse(@fs.read_file(@env.get_env_var("GITHUB_EVENT_PATH").unwrap()).text())
+  let base = match event {
+    {"pull_request":{"base":{"sha":String(base),..},..},..} => Some(base)
+    {"before":String(base),..} if base != "0000000000000000000000000000000000000000" => Some(base)
+    _ => None
+  }
+  let relevant = match base {
+    Some(base) => {
+      let diff = @shell.Cmd("git",["diff","--name-only",base,"HEAD"]).output()
+      guard diff.exit_code() == 0 else {fail("git diff failed")}
+      diff.stdout().split("\n").any(path => !path.has_suffix(".md") && (path.has_prefix("mbtx/") || path.has_prefix("codex-rs/") || path == ".github/workflows/mbtx.yml"))
+    }
+    None => true
+  }
+  @fs.write_file(@env.get_env_var("GITHUB_OUTPUT").unwrap(), "code=\{relevant}\n", append=true)
+}

@@ -1,0 +1,18 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:14318
+exporters:
+  file/traces:
+    path: ${env:MBTX_OTEL_ARCHIVE}/traces.jsonl
+  file/logs:
+    path: ${env:MBTX_OTEL_ARCHIVE}/logs.jsonl
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [file/traces]
+    logs:
+      receivers: [otlp]
+      exporters: [file/logs]

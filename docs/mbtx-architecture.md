@@ -1,6 +1,6 @@
 # Programmable MBTX Architecture
 
-**Status:** Accepted architecture; bounded stage-one tool validation passed on macOS ARM64 and Linux x86_64. Stage-two accounting is implemented; its Linux validation remains user-operated. Stage records distinguish completed checks from pending platform evidence.
+**Status:** Accepted architecture. Bounded stage-one validation passed on macOS ARM64 and Linux x86_64; stage-two Linux replay evidence was independently reconstructed. Stage-three pilot collection, reports and observation adapters are implemented. Stage records distinguish local checks from pending Linux and live research acceptance.
 **Baseline inspected:** `31ffe2bc9adccfe5fd3d29208250f796a13aa7a0` on 2026-09-15.
 **Scope:** The `ZSeanYves/codex-mbtx-runtime` fork of `openai/codex`.
 
@@ -13,8 +13,10 @@ documents the tool, target decision, validation and limitations. The
 The initial foundation reserved directories using `.gitkeep` files. Stage one
 activated the product extension, host bridge, fixtures and thin validation
 entry. Stage two activates the shared MoonBit accounting package and its
-executable. The Rust evaluation adapter, task oracles, comparative reports and
-observability deployment remain planned.
+executable. Stage three activates the Rust adapter, shared task oracles,
+comparative pilot reports and standard OTLP import. The
+[stage-three guide](mbtx-stage-three.md) records the executable protocol and
+remaining Linux, viewer and research acceptance boundaries.
 
 ## Contents
 
@@ -103,16 +105,16 @@ codex-mbtx-runtime/
 │   │   ├── src/                     # Programmable MBTX extension
 │   │   └── tests/.gitkeep
 │   └── mbtx-eval/
-│       ├── src/.gitkeep              # Reserved evaluation adapter sources
-│       └── tests/.gitkeep
+│       ├── Cargo.toml, BUILD.bazel   # Active collection adapter
+│       └── src/                     # OS/HTTP facts, replay and rendering
 ├── mbtx/
 │   ├── moon.mod                     # Shared MoonBit analysis module
-│   ├── evaluation/                  # Step analysis and coverage rules
+│   ├── evaluation/                  # Tasks, oracles, step analysis and reports
 │   ├── cmd/evaluation-model/        # Structured JSON analysis executable
 │   ├── fixtures/                     # Fixed inputs and example programs
 │   ├── scripts/                      # Thin .mbtx automation
 │   ├── config/                       # Public templates, no credentials
-│   └── observability/.gitkeep        # Collector and SigNoz configuration
+│   └── observability/               # Standard Collector configuration
 ├── docs/mbtx-architecture.md         # This document
 ├── codex-cli/, sdk/                  # Existing distribution and SDK areas
 └── scripts/, tools/, .github/        # Existing upstream engineering tools
@@ -122,11 +124,11 @@ There is no second MBTX documentation tree. Architecture, protocol, and running
 instructions belong under root `docs/`, with links from the README. Keep these
 documents in English and distinguish designed behavior from implemented behavior.
 
-| Planned package                                                   | Owner and public surface                                                                                                                                                                                                                      |
+| Package                                                           | Owner and public surface                                                                                                                                                                                                                      |
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `codex-rs/ext/mbtx`, crate `codex-mbtx-extension`                 | Tool registration, input validation, program preparation, compiler invocation, cache decisions, and structured tool outcomes. Export installation/configuration and the smallest required host contract; keep implementation modules private. |
 | `codex-rs/mbtx-eval`, crate `codex-mbtx-eval`, binary `mbtx-eval` | Real Codex execution/replay, OS/HTTP observation, artifact persistence, native trace reduction, and report/OTLP adapters. It collects facts rather than deciding task correctness or statistical inclusion.                                   |
-| `mbtx/evaluation`, in the MoonBit module rooted at `mbtx/` | Step aggregation and coverage rules are active. Task definitions, oracles, comparability, statistics, and comparative reporting are later additions to this shared package. |
+| `mbtx/evaluation`, in the MoonBit module rooted at `mbtx/` | Step aggregation, coverage, pilot tasks, independent output oracles, failure classification, populations and descriptive paired comparisons. Formal uncertainty rules remain pending pilot evidence. |
 | `mbtx/cmd/evaluation-model`                                       | A small prebuilt executable exposing the evaluation package to the Rust CLI through a versioned structured stream. No duplicate analysis logic.                                                                                               |
 
 Add valid `Cargo.toml`, `BUILD.bazel`, workspace membership, `moon.mod`, and
@@ -473,9 +475,9 @@ Equal instrumentation is not proof of zero perturbation, especially when the
 arms emit different amounts of data. Keep exporter flush time distinct from
 task completion and bound shutdown. Step counts still require complete events.
 
-The proposed `mbtx-eval` CLI has four operations; these remain future adapter
-work. Stage two supplies the narrower `evaluation-model` executable described
-in the [accounting guide](mbtx-stage-two.md):
+The `mbtx-eval` CLI exposes the following operations. It uses the prebuilt
+`evaluation-model` worker for the shared analysis described in the
+[accounting guide](mbtx-stage-two.md) and the pilot protocol:
 
 | Operation                                 | Contract                                                                                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -499,7 +501,7 @@ executable. Integrate actual new crates with Cargo and Bazel together. Honor
 when introducing supported configuration. Do not regenerate a separate Codex
 checkout, apply a hidden patch at collection time, or maintain competing locks.
 
-Use one documented bundle preparation entry, eventually a thin `.mbtx` script.
+Use the single bundle preparation entry, `mbtx/scripts/prepare-evaluation.mbtx`.
 The measured loop invokes prebuilt components and never uses `cargo run`, starts
 the analysis compiler per arm, or reinstalls dependencies. One analysis worker
 can handle a run/report session through a versioned JSON stream. Keep parsing
@@ -529,8 +531,8 @@ second unchanged bundle preparation must reuse completed artifacts.
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Foundation                    | Completed: architecture and directory reservations.                                                                                                                                                                                                                       |
 | Capability prototype and tool | Completed: unmodified baseline build and native/Wasm target comparison on macOS; bounded tool validation on macOS ARM64 and Linux x86_64. The [stage-one record](mbtx-stage-one.md#linux-validation-record) preserves the Linux transcript, coverage and evidence limits. |
-| Step identity                 | Implemented: native logical-round associations, HTTP sends, MoonBit accounting and fixed replay. The [stage-two record](mbtx-stage-two.md) documents validation, request coverage and Linux verification still to be performed by the user. |
-| Evaluation and observation    | Extend the active MoonBit accounting package and activate the adapter; validate task oracles, request pacing, immutable attempts, faults, HTML escaping, comparative report reconstruction, SigNoz import, and build reuse. |
+| Step identity                 | Implemented: native logical-round associations, HTTP sends, MoonBit accounting and fixed replay. The [stage-two record](mbtx-stage-two.md) includes reconstruction of all eight user-supplied Linux captures. |
+| Evaluation and observation    | Implemented: eight-goal pilot, shared oracles, paced adapter, immutable attempts, fault/recovery handling, reports, standard OTLP export/import and bundle reuse. The [stage-three record](mbtx-stage-three.md) distinguishes verified Collector ingestion from pending SigNoz UI and user-operated Linux acceptance. |
 | Code delivery                 | Ship reviewed implementation, scoped tests, fixed replay, fixtures, configuration, and runnable collection guidance. Record any unresolved platform boundary.                                                                                                              |
 | Research acceptance           | After user-run Linux data returns, assess completeness, failure populations, uncertainty, and conclusions. No benefit claim or default switch before evidence.                                                                                                             |
 
@@ -540,7 +542,7 @@ relevant prototype before depending on it:
 | Decision                                          | Required evidence                                                                                                                    |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | Remaining request observation coverage            | Extend native request observation to WebSocket and auxiliary endpoints before claiming complete request totals for those transports. |
-| Relay adapter reuse                               | Confirm forwarding, complete-stream serialization, cooldown, cancellation, and real request counts with controlled endpoints.        |
+| Live relay behavior                               | Controlled forwarding, complete-stream serialization and cooldown are tested; validate the configured provider with the Linux pilot. |
 | Sample sizes and task budgets                     | Pilot task difficulty/request cost, then a frozen protocol and analysis plan; no outcome-based selection.                            |
 | Collector deployment and public artifact location | Demonstrate ingestion and standalone reconstruction while keeping credentials out of published data.                                 |
 
