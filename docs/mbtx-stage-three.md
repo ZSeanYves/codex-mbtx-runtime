@@ -1,8 +1,11 @@
 # Stage Three: Programmable Tool Evaluation
 
-Stage three activates the Rust collection adapter and extends the shared MoonBit
-evaluation package. It prepares a user-operated Linux pilot. Formal sample size,
-success claims and comparative research conclusions remain pending pilot evidence.
+Stage three activates the Rust collection adapter and shared MoonBit evaluation
+package. The completed small pilot motivated the [expanded study protocol](mbtx-study-protocol.md),
+which defines 24 scenarios, four input variants and two repetitions (192 pairs),
+saved-source validation and task-aware uncertainty. Use `collect-study.mbtx` for
+new research collection. The eight-task pilot remains a small diagnostic suite;
+its outcomes are not pooled with the new study.
 
 ## Runtime and analysis ownership
 
@@ -15,7 +18,7 @@ report. Collection never compiles its harness or prepares dependencies per arm.
 
 Shell remains the default product interface. Evaluation selects `shell_tool`
 or `mbtx_program` explicitly. Both use the same frozen model catalog with direct
-tools, workspace-write sandbox, common instructions, output budget and available
+tools, explicit workspace filesystem permissions, common instructions, configured Codex output allowance and available
 system utilities. The MBTX arm disables Shell tool exposure; the Shell arm disables
 MBTX. Code Mode, delegation, plugins and memories are disabled. Requests preserve
 the actual tool schemas, and the local gate checks execution-tool exposure.
@@ -23,10 +26,13 @@ the actual tool schemas, and the local gate checks execution-tool exposure.
 The treatment includes the interface description, installed utilities and MoonBit
 libraries. It is not a claim about language syntax alone. A Shell arm may submit a
 complete script. MBTX may invoke native utilities within the same permissions.
+Native per-tool output contracts remain different (Shell tokens versus MBTX stream
+bytes); the [study protocol](mbtx-study-protocol.md) specifies this attribution
+boundary. The shared Codex allowance does not make those contracts identical.
 
 ## Pilot protocol
 
-The `programmable-steps-pilot-v2` protocol defines eight goals: repository indexing,
+The `programmable-steps-pilot-v3` diagnostic protocol defines eight goals: repository indexing,
 structured aggregation, Unicode record normalization, subprocess orchestration,
 log diagnosis, configuration repair, bounded-output inspection, and recovery of a
 partially processed dataset. Inputs and oracles are stored in the run manifest;
@@ -34,10 +40,14 @@ only inputs and goals enter each workspace. The independent oracle compares
 structured output and verifies preservation of other task inputs. It does not
 accept a model's assertion that the task succeeded.
 
-Version two states output field names and types in each model-visible goal. It
+Version two stated output field names and types in each model-visible goal. It
 preserves tasks and expected values but does not pool new attempts with version-one
 samples. Recovery merge now explicitly requires `total`; the earlier prompt did
 not fix that key. Old manifests and reports retain their original verdicts.
+Version three adds a real Git repository per attempt, isolated Git configuration,
+limited filesystem reads, a frozen MoonBit registry index and an updated generic
+tool example. These environmental changes are not retroactively applied to old
+evidence. Reconstruct older runs with their original analysis bundle.
 
 The MBTX tool includes a bounded, versioned file/JSON/child-process example, executed
 by offline validation. Both arms receive the same utility and dependency reference.
@@ -57,6 +67,12 @@ prepared once; model-generated source is compiled during real tool work.
 
 Project instruction loading and automatic skill instructions are disabled, project
 config discovery stops at the workspace, and login-shell initialization is disabled.
+Each arm starts from the same deterministic Git commit in its own repository.
+The old empty `.git` marker did not stop Git from discovering the parent checkout;
+the current setup verifies the actual repository root and clean baseline.
+Task tools can read only platform runtime files, the recorded compiler/library
+paths, frozen dependency/index data and their own work area. The user's MoonBit
+publishing credentials and evaluator manifests are outside that read policy.
 `agents.enabled=false` disables delegation. The gate checks top-level tools and
 namespaced `additional_tools` before forwarding. It refuses unexpected tools or
 inherited instruction fragments and preserves rejected requests as harness evidence.
@@ -74,8 +90,8 @@ Every scheduled arm remains in intention-to-treat denominators. Oracle success,
 execution status and counting coverage are separate. Paired step differences
 require two successful arms with complete step evidence. Reports also preserve
 the first observed step/tool divergence and inferred repair candidates. Pilot
-means are descriptive; formal task-aware uncertainty rules and repetitions must
-be frozen after the pilot. Fixed-response replay is a separate validation mode.
+means are descriptive. The expanded study freezes scenario-aware uncertainty and
+repetitions separately. Fixed-response replay is a separate validation mode.
 
 ## Build and run
 
@@ -144,8 +160,9 @@ directory. Linux and macOS datasets remain separate. To start with two goals:
 moon run mbtx/scripts/collect-pilot.mbtx relay --tasks structured-summary,configuration-repair --credentials-file /private/path/credentials.json
 ```
 
-A full eight-goal pilot is recommended before changing task difficulty or sample
-size. This phase does not collect the former launcher benchmark's 192 pairs.
+Use a small diagnostic run when investigating setup, and the expanded study for
+new comparative data. Its 192 pairs are programmable-task experiments, separate
+from the old repository's transparent-launcher experiments.
 
 After collection stops, package evidence without dependency copies and workspaces:
 

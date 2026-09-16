@@ -16,7 +16,9 @@ entry. Stage two activates the shared MoonBit accounting package and its
 executable. Stage three activates the Rust adapter, shared task oracles,
 comparative pilot reports and standard OTLP import. The
 [stage-three guide](mbtx-stage-three.md) records the executable protocol and
-remaining Linux, viewer and research acceptance boundaries.
+remaining Linux, viewer and research acceptance boundaries. The
+[expanded study protocol](mbtx-study-protocol.md) freezes the post-pilot task
+families, reusable-program acceptance, paired assignment and uncertainty rules.
 
 ## Contents
 
@@ -128,7 +130,7 @@ documents in English and distinguish designed behavior from implemented behavior
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `codex-rs/ext/mbtx`, crate `codex-mbtx-extension`                 | Tool registration, input validation, program preparation, compiler invocation, cache decisions, and structured tool outcomes. Export installation/configuration and the smallest required host contract; keep implementation modules private. |
 | `codex-rs/mbtx-eval`, crate `codex-mbtx-eval`, binary `mbtx-eval` | Real Codex execution/replay, OS/HTTP observation, artifact persistence, native trace reduction, and report/OTLP adapters. It collects facts rather than deciding task correctness or statistical inclusion.                                   |
-| `mbtx/evaluation`, in the MoonBit module rooted at `mbtx/` | Step aggregation, coverage, pilot tasks, independent output oracles, failure classification, populations and descriptive paired comparisons. Formal uncertainty rules remain pending pilot evidence. |
+| `mbtx/evaluation`, in the MoonBit module rooted at `mbtx/` | Step aggregation, coverage, pilot and expanded tasks, independent visible/withheld output oracles, failure classification, populations and stratified hierarchical paired uncertainty. |
 | `mbtx/cmd/evaluation-model`                                       | A small prebuilt executable exposing the evaluation package to the Rust CLI through a versioned structured stream. No duplicate analysis logic.                                                                                               |
 
 Add valid `Cargo.toml`, `BUILD.bazel`, workspace membership, `moon.mod`, and
@@ -532,7 +534,7 @@ second unchanged bundle preparation must reuse completed artifacts.
 | Foundation                    | Completed: architecture and directory reservations.                                                                                                                                                                                                                       |
 | Capability prototype and tool | Completed: unmodified baseline build and native/Wasm target comparison on macOS; bounded tool validation on macOS ARM64 and Linux x86_64. The [stage-one record](mbtx-stage-one.md#linux-validation-record) preserves the Linux transcript, coverage and evidence limits. |
 | Step identity                 | Implemented: native logical-round associations, HTTP sends, MoonBit accounting and fixed replay. The [stage-two record](mbtx-stage-two.md) includes reconstruction of all eight user-supplied Linux captures. |
-| Evaluation and observation    | Implemented: eight-goal pilot, shared oracles, paced adapter, immutable attempts, fault/recovery handling, reports, standard OTLP export/import and bundle reuse. The [stage-three record](mbtx-stage-three.md) distinguishes verified Collector ingestion from pending SigNoz UI and user-operated Linux acceptance. |
+| Evaluation and observation    | Implemented: diagnostic pilot plus a [24-scenario paired study](mbtx-study-protocol.md), reusable-program validation on withheld inputs, isolated Git/sandbox workspaces, hierarchical uncertainty, paced adapter, immutable batches, fault/recovery handling, reports and standard OTLP export/import. The [stage-three record](mbtx-stage-three.md) distinguishes implementation checks from user-operated Linux acceptance. |
 | Code delivery                 | Ship reviewed implementation, scoped tests, fixed replay, fixtures, configuration, and runnable collection guidance. Record any unresolved platform boundary.                                                                                                              |
 | Research acceptance           | After user-run Linux data returns, assess completeness, failure populations, uncertainty, and conclusions. No benefit claim or default switch before evidence.                                                                                                             |
 
