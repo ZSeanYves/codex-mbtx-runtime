@@ -39,7 +39,7 @@ pub fn pilot_protocol() -> Json {
   log.write_string("tail 雪\n")
   {
     "schema_version": 1,
-    "protocol_id": "programmable-steps-pilot-v2",
+    "protocol_id": "programmable-steps-pilot-v3",
     "population": "pilot",
     "observation": {
       "native_trace": true,

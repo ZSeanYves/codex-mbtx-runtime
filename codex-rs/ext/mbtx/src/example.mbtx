@@ -6,6 +6,11 @@ import {
 }
 
 async fn main {
+  // split returns an iterator; materialize it before indexing or reusing it.
+  let fields = "alpha,beta".split(",").to_array()
+  // Annotate heterogeneous objects as Json rather than an inferred Map.
+  let example : Json = { "label": fields[0].to_owned().to_json(), "count": 2 }
+  assert_eq(@json.parse(example.stringify()), @json.parse("{\"label\":\"alpha\",\"count\":2}"))
   let value = @json.parse(@fs.read_file("input.json").text())
   @fs.write_file("copy.json", value.stringify() + "\n")
   assert_eq(@json.parse(@fs.read_file("copy.json").text()), value)
