@@ -22,6 +22,11 @@ async fn main {
   guard @fs.exists("codex-rs/Cargo.toml") else { fail("Run from the repository root") }
   let args = @env.args()
   let build_env : Map[String, String] = {"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_PROFILE_TEST_DEBUG":"0","CARGO_INCREMENTAL":"0","CARGO_BUILD_JOBS":"4","NO_PROXY":"127.0.0.1,localhost,::1","no_proxy":"127.0.0.1,localhost,::1"}
+  // Module checks do not compile standalone .mbtx entry points. Check the
+  // public collectors even in the fast, relay-free validation layer.
+  for script in ["collect-study","collect-pilot","validate-study","diagnose-study"] {
+    @shell.Cmd("moon",["check","mbtx/scripts/"+script+".mbtx"]).run()
+  }
   @shell.Cmd("moon", ["check", "--target", "wasm"], cwd="mbtx").run()
   @shell.Cmd("moon", ["test", "--target", "wasm"], cwd="mbtx").run()
   @shell.Cmd("just", ["test", "-p", "codex-mbtx-eval", "-p", "codex-mbtx-extension", "-p", "codex-rollout-trace", "--locked", "--retries=0"], env=build_env).run()
@@ -83,7 +88,10 @@ async fn main {
     let child = @process.spawn(group,evaluator,["run","--bundle",bundle,"--output",interrupted,"--mode","replay","--tasks","structured-summary","--replay-fault","stall"])
     let mut process = ""
     let mut sent = false
-    for _ in 0..<300 {
+    // Integrity verification precedes run-directory creation. It is preparation,
+    // not response-stream time; large debug bundles can take over 30 seconds.
+    for _ in 0..<1800 {
+      if child.try_wait() is Some(code) {fail("interruption collector exited before the response stream (exit \{code}); inspect its startup error above")}
       if @fs.exists(interrupted + "/attempts") {
         @fs.walk(interrupted + "/attempts",max_concurrency=1,(path,files) => {
           if files.contains("started.json") {sent=true}
@@ -93,7 +101,7 @@ async fn main {
       if sent && process != "" {break}
       @async.sleep(100)
     }
-    guard sent && process != "" else {child.cancel(); fail("interruption fixture never reached the response stream")}
+    guard sent && process != "" else {child.cancel(); fail("interruption fixture did not reach the response stream within 180 seconds, including bundle verification")}
     guard @json.parse(@fs.read_file(process).text()) is {"pid":Number(pid,..),..} else {fail("recorded PID")}
     @shell.Cmd("kill",["-KILL",child.pid.to_string()]).run()
     let _ = child.wait()

@@ -25,6 +25,14 @@ pub(crate) fn git_environment(command: &mut Command, workspace: &Path) {
 pub(crate) fn permissions(work: &Path, bundle: &Path, moon_home: &Path) -> Result<toml::Value> {
     let mut filesystem = toml::Table::new();
     filesystem.insert(":minimal".into(), "read".into());
+    // Bubblewrap re-enters this binary to apply seccomp before the task starts.
+    // Native tool execution and `codex sandbox` do not add this readable path
+    // automatically. Expose the executable, never the bundle or checkout root.
+    let codex = bundle
+        .join("codex")
+        .canonicalize()
+        .context("resolve sandbox re-entry executable")?;
+    filesystem.insert(codex.to_string_lossy().into_owned(), "read".into());
     for path in [
         moon_home.join("bin"),
         moon_home.join("lib"),

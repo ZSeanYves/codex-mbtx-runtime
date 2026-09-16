@@ -10,7 +10,10 @@ async fn main {
   guard args.length()>=2 && ["replay","relay"].contains(args[1]) else {
     fail("Usage: moon run mbtx/scripts/collect-study.mbtx replay|relay [mbtx-eval run options]")
   }
-  let bundle=@env.get_env_var("MBTX_BUNDLE").unwrap_or_else(() => @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned())
+  let bundle=match @env.get_env_var("MBTX_BUNDLE") {
+    Some(value)=>value
+    None=>@fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
+  }
   let platform=@shell.Cmd("uname",["-s"]).output().stdout().trim().to_owned()
   if args[1]=="relay" && platform!="Linux" {fail("The current online study protocol requires Linux")}
   let command=["run","--bundle",bundle,"--mode",args[1]]

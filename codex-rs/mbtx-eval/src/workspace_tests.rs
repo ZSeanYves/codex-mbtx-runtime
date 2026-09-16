@@ -1,6 +1,50 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[test]
+fn sandbox_reentry_exposes_only_the_bundle_executable() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let root = root.path().canonicalize()?;
+    let bundle = root.join("bundle with spaces");
+    let work = root.join("attempt");
+    let moon_home = root.join("moon");
+    fs::create_dir(&bundle)?;
+    fs::write(bundle.join("codex"), "sandbox helper")?;
+    fs::write(bundle.join("models.json"), "private catalog")?;
+    fs::write(root.join("run.json"), "private manifest")?;
+    for name in ["workspace", "home", "tmp"] {
+        fs::create_dir_all(work.join(name))?;
+    }
+    let profile = permissions(&work, &bundle, &moon_home)?;
+    let encoded = toml::to_string(&profile)?;
+    let decoded: toml::Value = toml::from_str(&encoded)?;
+    let filesystem = decoded["evaluation"]["filesystem"].as_table().unwrap();
+    let mut expected = toml::Table::from_iter([
+        (":minimal".into(), "read".into()),
+        (
+            bundle.join("codex").to_string_lossy().into_owned(),
+            "read".into(),
+        ),
+    ]);
+    for name in ["workspace", "home", "tmp"] {
+        expected.insert(
+            work.join(name).to_string_lossy().into_owned(),
+            "write".into(),
+        );
+    }
+    for path in [Path::new("/opt/homebrew"), Path::new("/opt/local")] {
+        if path.exists() {
+            expected.insert(
+                path.canonicalize()?.to_string_lossy().into_owned(),
+                "read".into(),
+            );
+        }
+    }
+    // A broad grant would expose the model catalog, manifest and sibling arms.
+    assert_eq!(filesystem, &expected);
+    Ok(())
+}
+
 #[tokio::test]
 async fn nested_arms_have_identical_clean_baselines_and_no_parent_metadata() -> Result<()> {
     let root = tempfile::tempdir()?;

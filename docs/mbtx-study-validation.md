@@ -44,6 +44,60 @@ compiler prevents collection but still permits analysis-bundle verification;
 altering the bundled analysis remains an error. Formatting and scoped Clippy
 checks follow behavioral validation; no research result is inferred from them.
 
+## Linux bootstrap repair
+
+The user-operated Linux validation run `run-1789563543363` retained 24 failed
+arms before its first-batch assertion stopped the pipeline. A native tool result
+from Shell attempt `cad8f11f-fcb7-428a-a1b6-90420985a73b` reported
+`bwrap: execvp .../evaluation-bundles/.../codex: No such file or directory`.
+The tool never reached the task. The restricted filesystem profile omitted the
+Codex binary that bubblewrap re-enters to apply seccomp; the local native and
+standalone sandbox paths do not insert that path automatically. These failed
+arms provide no evidence of a Shell/MBTX task-capability difference.
+
+The repair adds the canonical Codex executable as a shared read-only file grant,
+without granting access to its parent bundle or checkout. A regression checks
+the serialized permission profile with a bundle path containing spaces. It also
+fixes the collector's asynchronous file read inside a synchronous fallback
+closure, which previously prevented the public entry point from compiling.
+Fast validation now compiles the standalone collectors. Study validation uses
+the public collector, checks one pair first, diagnoses failures from retained
+evidence, and resumes the remaining 23 pairs only after that first pair succeeds.
+Schedule integrity and successful comparison counts have separate assertions.
+
+Repair checks on macOS ARM64 passed all 19 MoonBit and 81 Rust tests, 288 fixture
+checks, 24 study pairs with 144 submission executions, one workflow pair, the
+16-arm pilot and eight controlled fault arms. Nextest initially flagged one
+process-capture test as leaky despite its assertions passing; its isolated rerun
+passed without that flag. This does not establish the cause of the transient flag.
+
+The full run exposed a separate 30-second startup wait in the interruption test.
+Bundle verification alone took 28.52 seconds in a direct measurement, leaving
+insufficient time for collector initialization. The test now allows up to 180
+seconds including preparation and stops immediately on early collector exit.
+It still waits for an observed request before injecting SIGKILL. A targeted
+continuation of that exact test block passed censored-report recovery, 16
+recorded-response arms and unchanged-bundle reuse. Previously passed scenarios
+were retained rather than rerun as if the initial invocation had completed.
+
+Local evidence for this repair:
+
+- Study replay: `_build/study-validation/run-1789564672334`; two batches of one
+  and 23 pairs; complete report `759cabd0-60e3-4424-b708-a68346500aae`.
+- Pilot and faults: `_build/stage-three-validation/run-1789564948075` and its
+  `-429`, `-500`, `-disconnect` and `-truncated` siblings.
+- Successful recovery continuation: the same prefix with `-interrupted` and
+  `-recorded`; logs `_build/study-fix-validation.log` and
+  `_build/study-fix-recovery.log` preserve the original stop and continuation.
+- Initial repair bundle: `fa397ae8e6128b76fb0c9b574fdcb66ec79314f2`;
+  startup-wait repair bundle: `03fc9dcd3c1041bc620b01bf6cc9d4482a6565a2`.
+- The read-only diagnostic command succeeded against both a successful retained
+  pair and a controlled 429 run, writing its output outside sealed evidence.
+
+Linux execution after this repair remains user-operated. macOS execution cannot
+verify Linux namespace or bubblewrap behavior; successful local replay is a
+regression check rather than a claim of Linux acceptance.
+
 ## Reproduction and remaining acceptance
 
 Run `moon run mbtx/scripts/validate-evaluation.mbtx` from the repository root for

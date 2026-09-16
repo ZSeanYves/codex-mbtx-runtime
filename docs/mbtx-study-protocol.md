@@ -43,6 +43,11 @@ interpretation must include these interface policies; fewer steps alone cannot
 establish a MoonBit-language advantage independent of output delivery. No model
 request is silently rewritten.
 
+The permission profile also grants read access to the bundle's `codex` executable.
+Linux bubblewrap re-enters that executable to install seccomp before it starts
+the task. This is a file-level grant shared by both arms and submission validation;
+it does not expose the enclosing bundle directory or evaluator manifests.
+
 ## Coverage and assignment
 
 The study covers 24 scenarios across eight families. Each scenario has four
@@ -121,13 +126,35 @@ credentials described in [stage three](mbtx-stage-three.md). No system-wide
 Codex login or new API account is needed.
 
 ```bash
-git pull --ff-only origin main
-moon run mbtx/scripts/validate-evaluation.mbtx
+git pull --ff-only origin main &&
+moon run mbtx/scripts/validate-evaluation.mbtx &&
+export MBTX_BUNDLE="$(cat _build/evaluation-bundle.txt)"
 ```
 
 Validation prepares the bundle once, runs the offline checks, and leaves its path
 in `_build/evaluation-bundle.txt`. It does not forward any requests to the relay.
+The final export replaces any stale bundle selection left in the terminal.
 Use `prepare-evaluation.mbtx` alone when only a fresh build bundle is required.
+
+Continue to online collection only after validation succeeds. Study validation
+first executes one fixed pair through the public collection script, checks the
+retained schedule and successful outcomes separately, then resumes the other 23
+pairs. A failing first pair stops validation and prints tool errors and evidence
+paths. All standalone collection entry points are compiled in the fast checks.
+
+For a retained failed run, inspect the first unsuccessful attempt from each arm
+without rebuilding, editing its evidence or sending API requests:
+
+```bash
+moon run mbtx/scripts/diagnose-study.mbtx _build/study-validation/run-TIMESTAMP
+```
+
+The script writes a diagnostic text file beside the run and includes native
+tool output, MBTX build/run details and submission stderr when available. Linux
+`bwrap: execvp .../codex: No such file or directory` is a sandbox bootstrap
+failure before task execution, not evidence of a Shell/MBTX capability difference.
+Keep failed evidence; after changing the bundle or permission profile, validate
+and collect into a new run rather than resuming the old experimental condition.
 
 The default study plans 192 pairs. The following command completes up to 24 new
 pairs per invocation, retaining the entire frozen schedule:

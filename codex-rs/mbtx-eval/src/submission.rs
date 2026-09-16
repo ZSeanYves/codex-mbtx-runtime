@@ -90,7 +90,9 @@ impl Validator<'_> {
         let meta = match fs::symlink_metadata(&path) {
             Ok(meta) => meta,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(json!({"status":"missing_source","source":null,"build":null,"cases":[]}));
+                return Ok(
+                    json!({"status":"missing_source","source":null,"build":null,"cases":[]}),
+                );
             }
             Err(error) => return Err(error.into()),
         };
