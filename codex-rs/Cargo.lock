@@ -3858,6 +3858,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-mbtx-eval"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bytes",
+ "clap",
+ "codex-rollout-trace",
+ "futures",
+ "httpdate",
+ "libc",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "toml 0.9.11+spec-1.1.0",
+ "uuid",
+ "walkdir",
+ "which 8.0.0",
+]
+
+[[package]]
 name = "codex-mbtx-extension"
 version = "0.0.0"
 dependencies = [

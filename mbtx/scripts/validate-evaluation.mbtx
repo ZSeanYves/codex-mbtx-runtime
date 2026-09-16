@@ -1,0 +1,94 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/async@0.21.3/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+
+async fn report_text(root : String) -> String {
+  let reports : Array[String] = []
+  @fs.walk(root + "/reports", max_concurrency=1, (path, files) => {
+    if files.contains("report.json") {reports.push(path + "/report.json")}
+  })
+  guard !reports.is_empty() else {fail("No reconstructed report: \{root}")}
+  let first = @fs.read_file(reports[0]).text()
+  for path in reports {assert_eq(@fs.read_file(path).text(),first)}
+  first
+}
+
+async fn main {
+  guard @fs.exists("codex-rs/Cargo.toml") else { fail("Run from the repository root") }
+  let args = @env.args()
+  let build_env : Map[String, String] = {"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_PROFILE_TEST_DEBUG":"0","CARGO_INCREMENTAL":"0","CARGO_BUILD_JOBS":"4","NO_PROXY":"127.0.0.1,localhost,::1","no_proxy":"127.0.0.1,localhost,::1"}
+  @shell.Cmd("moon", ["check", "--target", "wasm"], cwd="mbtx").run()
+  @shell.Cmd("moon", ["test", "--target", "wasm"], cwd="mbtx").run()
+  @shell.Cmd("just", ["test", "-p", "codex-mbtx-eval", "-p", "codex-mbtx-extension", "-p", "codex-rollout-trace", "--locked", "--retries=0"], env=build_env).run()
+  if args.contains("--fast") { println("Stage-three fast validation passed"); return }
+  @shell.Cmd("moon", ["run", "mbtx/scripts/prepare-evaluation.mbtx"]).run()
+  let bundle = @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
+  let evaluator = bundle + "/mbtx-eval"
+  let root = "_build/stage-three-validation/run-\{@env.now()}"
+  @shell.Cmd(evaluator,["run","--bundle",bundle,"--output",root,"--mode","replay"]).run()
+  let reports : Array[String] = []
+  @fs.walk(root + "/reports", max_concurrency=1, (path, files) => {
+    if files.contains("report.json") {reports.push(path + "/report.json")}
+  })
+  assert_eq(reports.length(),1)
+  let original = @fs.read_file(reports[0]).text()
+  guard @json.parse(original) is {"partial":False,"conditional":{"pairs":Number(8,..),..},"attempts":Array(attempts),..} else {fail("replay did not produce eight comparable pairs")}
+  for attempt in attempts {
+    guard attempt is {"status":String("success"),"oracle":{"success":True,..},"accounting":{"complete":True,"metrics":{"agent_steps":Number(2,..),..},..},..} else {fail("fixed replay failed: \{attempt.stringify()}")}
+  }
+  @shell.Cmd(evaluator,["report",root,"--bundle",bundle,"--format","all"]).run()
+  @fs.walk(root + "/reports", max_concurrency=1, (path, files) => {
+    if files.contains("report.json") { assert_eq(@fs.read_file(path + "/report.json").text(),original) }
+  })
+  // A finished resume is a no-op for attempts and HTTP requests. Seal checking
+  // and exact reconstruction expose accidental overwrites or extra attempts.
+  @shell.Cmd(evaluator,["run","--bundle",bundle,"--output",root,"--mode","replay","--resume"]).run()
+  assert_eq(report_text(root),original)
+  for fault in ["429","500","disconnect","truncated"] {
+    let output = root + "-" + fault
+    @shell.Cmd(evaluator,["run","--bundle",bundle,"--output",output,"--mode","replay","--tasks","structured-summary","--replay-fault",fault]).run()
+    guard @json.parse(report_text(output)) is {"attempts":Array(attempts),..} else {fail("fault report")}
+    assert_eq(attempts.length(),2)
+    for attempt in attempts {
+      guard attempt is {"status":String("relay_error"),..} else {fail("external fault attribution: \{attempt.stringify()}")}
+    }
+  }
+  // Kill the actual collector after a real Codex request starts. The stalled
+  // response has not dispatched a tool, so only these two owned PIDs exist.
+  let interrupted = root + "-interrupted"
+  @async.with_task_group(group => {
+    let child = @process.spawn(group,evaluator,["run","--bundle",bundle,"--output",interrupted,"--mode","replay","--tasks","structured-summary","--replay-fault","stall"])
+    let mut process = ""
+    let mut sent = false
+    for _ in 0..<300 {
+      if @fs.exists(interrupted + "/attempts") {
+        @fs.walk(interrupted + "/attempts",max_concurrency=1,(path,files) => {
+          if files.contains("started.json") {sent=true}
+          if files.contains("process.json") {process=path + "/process.json"}
+        })
+      }
+      if sent && process != "" {break}
+      @async.sleep(100)
+    }
+    guard sent && process != "" else {child.cancel(); fail("interruption fixture never reached the response stream")}
+    guard @json.parse(@fs.read_file(process).text()) is {"pid":Number(pid,..),..} else {fail("recorded PID")}
+    @shell.Cmd("kill",["-KILL",child.pid.to_string()]).run()
+    let _ = child.wait()
+    // This is the PID recorded by the just-spawned, controlled test collector.
+    let _ = @shell.Cmd("kill",["-KILL",pid.to_int().to_string()]).output()
+  })
+  @shell.Cmd(evaluator,["report",interrupted,"--bundle",bundle,"--format","all"]).run()
+  guard @json.parse(report_text(interrupted)) is {"partial":True,"attempts":[{"status":String("censored"),..}],"conditional":{"pairs":Number(0,..),..},..} else {fail("killed attempt was not preserved as censored")}
+  @shell.Cmd(evaluator,["replay",root,"--bundle",bundle,"--output",root + "-recorded"]).run()
+  guard @json.parse(report_text(root + "-recorded")) is {"partial":False,"conditional":{"pairs":Number(8,..),..},..} else {fail("recorded replay failed")}
+  // An unchanged preparation must reuse the existing bundle without compilers.
+  @shell.Cmd("moon", ["run", "mbtx/scripts/prepare-evaluation.mbtx"]).run()
+  assert_eq(@fs.read_file("_build/evaluation-bundle.txt").text().trim(),bundle[:])
+  println("Stage-three offline validation passed: 16 fixed arms, eight fault arms, collector SIGKILL recovery, 16 recorded arms, immutable resume, deterministic reports and bundle reuse. No online research result is inferred.")
+  println("Evidence: \{root}")
+}

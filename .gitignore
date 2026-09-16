@@ -99,3 +99,4 @@ __pycache__/
 /mbtx/scripts/_build/
 .mooncakes/
 .codex-mbtx/
+/mbtx/config/credentials.json

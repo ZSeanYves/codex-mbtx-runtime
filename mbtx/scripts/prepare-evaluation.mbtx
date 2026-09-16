@@ -1,0 +1,61 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/env",
+}
+
+async fn checked(command : @shell.Cmd) -> String {
+  let result = command.output(max_output_bytes=16000000)
+  guard result.exit_code() == 0 else { fail(result.stderr()) }
+  result.stdout().trim().to_owned()
+}
+
+async fn main {
+  guard @fs.exists("codex-rs/Cargo.toml") else { fail("Run from the repository root") }
+  let root = @fs.realpath(".")
+  let preparation_started = @env.now()
+  let base = root + "/_build/evaluation-bundles"
+  if !@fs.exists(base) { @fs.mkdir(base, recursive=true) }
+  let files = checked(@shell.Cmd("git", ["ls-files", "--cached", "--others", "--exclude-standard", "codex-rs", "mbtx", "MODULE.bazel", "MODULE.bazel.lock"]))
+    .split("\n").map(p => p.to_owned()).filter(p => !p.has_suffix(".md") && !p.has_suffix(".gitkeep"))
+  let paths : Array[String] = []
+  for path in files { if @fs.exists(path) { paths.push(path.to_json().stringify()) } }
+  let moon_root = @env.get_env_var("MOON_HOME").unwrap_or(@env.get_env_var("HOME").unwrap() + "/.moon")
+  // The script itself imports this exact dependency. Resolve fixture imports
+  // before hashing on a fresh host, so the next preparation has the same key.
+  if !@fs.exists(moon_root + "/cache/deps/v1/sources/moonbitlang/async/0.21.3/src/fs/moon.pkg") {
+    @shell.Cmd("moon", ["build", "--target", "wasm", "--target-dir", root + "/_build/fixture-dependencies", "mbtx/fixtures/capabilities.mbtx"]).run()
+  }
+  for folder in ["bin", "lib", "cache/deps/v1/sources"] {
+    @fs.walk(moon_root + "/" + folder, max_concurrency=1, (path, files) => {
+      for name in files {
+        let file = path + "/" + name
+        if (folder != "cache/deps/v1/sources" || !file.contains("/_build/")) && !file.contains("/.git/") && name != ".DS_Store" && @fs.kind(file, follow_symlink=false) == @fs.Regular { paths.push(file.to_json().stringify()) }
+      }
+    })
+  }
+  paths.push((moon_root + "/cache/deps/.moon-cache").to_json().stringify())
+  paths.sort()
+  let tools = checked(@shell.Cmd("moon", ["version", "--all"])) + "\n" + checked(@shell.Cmd("moonrun", ["--version"])) + "\n" + checked(@shell.Cmd("rustc", ["--version"], cwd="codex-rs")) + "\n" + checked(@shell.Cmd("uname", ["-sm"]))
+  // Git hashes file bytes in one process, including uncommitted implementation.
+  // Documentation does not enter the build key. No shell interpolation occurs.
+  let hashes = checked(@shell.Cmd("git", ["hash-object", "--stdin-paths"], stdin=@shell.Text(paths.join("\n") + "\n")))
+  let fingerprint = checked(@shell.Cmd("git", ["hash-object", "--stdin"], stdin=@shell.Text(paths.join("\n") + "\n" + hashes + "\n" + tools + "\ndev-debug0-wasm-release-v1")))
+  let bundle = base + "/" + fingerprint
+  let reused = @fs.exists(bundle + "/bundle.json")
+  if reused {
+    @shell.Cmd(bundle + "/mbtx-eval", ["verify-bundle", bundle]).run()
+    println("Reused bundle; no Codex, evaluator or fixture compilation: \{bundle}")
+  } else {
+    @shell.Cmd("moon", ["build", "--target", "wasm", "--release", "cmd/evaluation-model"], cwd="mbtx").run()
+    // Prepare the approved versioned imports before any measured invocation.
+    @shell.Cmd("moon", ["build", "--target", "wasm", "--target-dir", root + "/_build/fixture-dependencies", "mbtx/fixtures/capabilities.mbtx"]).run()
+    @shell.Cmd("cargo", ["build", "--locked", "-p", "codex-cli", "--bin", "codex", "-p", "codex-mbtx-eval", "--bin", "mbtx-eval", "-j", "4"], cwd="codex-rs", env={"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_INCREMENTAL":"0"}).run()
+    @shell.Cmd("codex-rs/target/debug/mbtx-eval", ["bundle", "--repo", root, "--output", bundle, "--fingerprint", fingerprint]).run()
+  }
+  @fs.write_file(root + "/_build/evaluation-bundle.txt", bundle + "\n")
+  let cost : Json = {"bundle":bundle.to_json(),"reused":reused.to_json(),"preparation_ms":(@env.now()-preparation_started).to_json(),"scope":"tool discovery, build or verification, and bundle assembly; excluded from attempts"}
+  @fs.write_file(base + "/preparation-\{@env.now()}.json", cost.stringify(indent=2) + "\n")
+  println("Bundle: \{bundle}")
+}

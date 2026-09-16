@@ -69,6 +69,7 @@ members = [
     "ext/items",
     "ext/memories",
     "ext/mbtx",
+    "mbtx-eval",
     "ext/mcp",
     "ext/queue",
     "ext/skills",
