@@ -37,13 +37,13 @@ LLVM, and Windows have not been accepted as interchangeable targets.
 
 The prototype used:
 
-| Component | Observed version |
-| --- | --- |
-| Upstream baseline | `31ffe2bc9adccfe5fd3d29208250f796a13aa7a0` |
-| Rust | Repository-pinned `1.95.0`, `aarch64-apple-darwin` |
-| moon / moonrun | `0.1.20260904`, revision `94521db` |
-| moonc | `v0.10.12+1634b282e`, 2026-09-07 |
-| Capability imports | `moonbitlang/async@0.21.3`, installed core |
+| Component          | Observed version                                   |
+| ------------------ | -------------------------------------------------- |
+| Upstream baseline  | `31ffe2bc9adccfe5fd3d29208250f796a13aa7a0`         |
+| Rust               | Repository-pinned `1.95.0`, `aarch64-apple-darwin` |
+| moon / moonrun     | `0.1.20260904`, revision `94521db`                 |
+| moonc              | `v0.10.12+1634b282e`, 2026-09-07                   |
+| Capability imports | `moonbitlang/async@0.21.3`, installed core         |
 
 The unmodified baseline CLI built successfully with `cargo build --locked -p
 codex-cli --bin codex -j 4`, `CARGO_PROFILE_DEV_DEBUG=0`, and
@@ -227,11 +227,11 @@ records its SHA-256, source references, tool versions, suite IDs and evidence
 limits. The transcript contains 1,196 individual `PASS` records, matching the
 three suite summaries:
 
-| Selected suite | Tests run | Passed | Failed | Outside selection / skipped | Runner elapsed |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Configuration, shared tools and MBTX extension | 426 | 426 | 0 | 0 | 0.541 s |
-| Core configuration, execution, policy and lifecycle | 762 | 762 | 0 | 1,757 | 27.476 s |
-| Real Codex + MoonBit fixed-SSE integration | 8 | 8 | 0 | 1,828 | 7.823 s |
+| Selected suite                                      | Tests run | Passed | Failed | Outside selection / skipped | Runner elapsed |
+| --------------------------------------------------- | --------: | -----: | -----: | --------------------------: | -------------: |
+| Configuration, shared tools and MBTX extension      |       426 |    426 |      0 |                           0 |        0.541 s |
+| Core configuration, execution, policy and lifecycle |       762 |    762 |      0 |                       1,757 |       27.476 s |
+| Real Codex + MoonBit fixed-SSE integration          |         8 |      8 |      0 |                       1,828 |        7.823 s |
 
 All eight MBTX integration cases ran: disabled-tool exclusion, CLI registration
 and execution, literal argv/cwd/environment/stream preservation, distinct compile

@@ -20,19 +20,19 @@ affected aggregate unknown rather than turning it into zero.
 
 The resulting counters are:
 
-| Counter | Meaning |
-| --- | --- |
-| `agent_steps_started` | Sampling rounds entered, including failed and interrupted rounds. |
-| `agent_steps` | Rounds whose response was accepted by the task loop. |
-| `model_requests` | HTTP inference send attempts started at the transport boundary; `null` when that coverage is incomplete. |
-| `http_transport_retries` | Sends after attempt zero within an observed request scope. |
-| `tool_calls` | Model-emitted tool calls, including calls whose stream later fails. |
-| `tool_executions` | Calls that reached the canonical dispatch boundary. |
-| `poll_or_input_calls` | Explicit polling or input operations when visible in the trace. |
-| `tool_errors` | Runtime tool failures; `null` if any tool result is missing or pending. |
-| `repair_steps` | `null` until a repair attribution is proven by task evidence. |
-| `process_spawns` | `null` until the same trace has complete process observation. |
-| `task_success` | `null` in this layer; task oracles belong to evaluation. |
+| Counter                  | Meaning                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `agent_steps_started`    | Sampling rounds entered, including failed and interrupted rounds.                                        |
+| `agent_steps`            | Rounds whose response was accepted by the task loop.                                                     |
+| `model_requests`         | HTTP inference send attempts started at the transport boundary; `null` when that coverage is incomplete. |
+| `http_transport_retries` | Sends after attempt zero within an observed request scope.                                               |
+| `tool_calls`             | Model-emitted tool calls, including calls whose stream later fails.                                      |
+| `tool_executions`        | Calls that reached the canonical dispatch boundary.                                                      |
+| `poll_or_input_calls`    | Explicit polling or input operations when visible in the trace.                                          |
+| `tool_errors`            | Runtime tool failures; `null` if any tool result is missing or pending.                                  |
+| `repair_steps`           | `null` until a repair attribution is proven by task evidence.                                            |
+| `process_spawns`         | `null` until the same trace has complete process observation.                                            |
+| `task_success`           | `null` in this layer; task oracles belong to evaluation.                                                 |
 
 The native trace remains the source of facts. Each step, request scope, request
 send, tool emission, and dispatch event is appended to `trace.jsonl`. The

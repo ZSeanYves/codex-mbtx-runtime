@@ -1,5 +1,6 @@
 /codex-cli/dist
 /codex-cli/node_modules
+/codex-rs/mbtx-eval/web/vendor
 pnpm-lock.yaml
 
 prompt.md

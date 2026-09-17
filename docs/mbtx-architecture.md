@@ -16,20 +16,20 @@ The upstream Shell path stays the default. MBTX is explicitly enabled.
 
 ## Package ownership
 
-| Location | Responsibility |
-|---|---|
-| `codex-rs/ext/mbtx` | Tool registration, source/file input, compiler plan, per-session compilation cache, bounded previews and reference/resource tool |
-| `codex-rs/tools` | Shared host process contract, full stream archive and UTF-8 resource pagination |
-| `codex-rs/core` | Narrow bridge to existing policy, approval, sandbox, environment, cancellation and unified execution services |
-| `codex-rs/config` | Explicit MBTX configuration and validation |
-| `codex-rs/rollout-trace` | Native append-only observations, payload references, reduction and logical step relationships |
-| `mbtx/evaluation` | Task definitions, private oracles, status classification, step accounting, timing interpretation and statistics |
-| `mbtx/cmd/evaluation-model` | Prebuilt MoonBit JSON-stream analysis worker |
-| `codex-rs/mbtx-eval` | Actual Codex/OS/HTTP execution, request gate, immutable evidence, worker receipts, adapters and rendering |
-| `codex-rs/mbtx-eval/web` | Embedded offline HTML interface and pinned ECharts assets |
-| `mbtx/reference` | Verified general language/API/tool guidance visible to both arms |
-| `mbtx/scripts` | Thin `.mbtx` preparation, validation, collection and packaging entries |
-| `mbtx/config` | Non-secret model/relay defaults |
+| Location                    | Responsibility                                                                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `codex-rs/ext/mbtx`         | Tool registration, source/file input, compiler plan, per-session compilation cache, bounded previews and reference/resource tool |
+| `codex-rs/tools`            | Shared host process contract, full stream archive and UTF-8 resource pagination                                                  |
+| `codex-rs/core`             | Narrow bridge to existing policy, approval, sandbox, environment, cancellation and unified execution services                    |
+| `codex-rs/config`           | Explicit MBTX configuration and validation                                                                                       |
+| `codex-rs/rollout-trace`    | Native append-only observations, payload references, reduction and logical step relationships                                    |
+| `mbtx/evaluation`           | Task definitions, private oracles, status classification, step accounting, timing interpretation and statistics                  |
+| `mbtx/cmd/evaluation-model` | Prebuilt MoonBit JSON-stream analysis worker                                                                                     |
+| `codex-rs/mbtx-eval`        | Actual Codex/OS/HTTP execution, request gate, immutable evidence, worker receipts, adapters and rendering                        |
+| `codex-rs/mbtx-eval/web`    | Embedded offline HTML interface and pinned ECharts assets                                                                        |
+| `mbtx/reference`            | Verified general language/API/tool guidance visible to both arms                                                                 |
+| `mbtx/scripts`              | Thin `.mbtx` preparation, validation, collection and packaging entries                                                           |
+| `mbtx/config`               | Non-secret model/relay defaults                                                                                                  |
 
 Product crates must not depend on benchmark tasks, hidden oracles, reports or the
 old research repository. The extension consumes a narrow host capability; it

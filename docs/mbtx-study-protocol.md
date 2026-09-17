@@ -73,16 +73,16 @@ deterministic visible-input variants and independent withheld-input instances.
 Two repetitions per visible variant give 192 planned pairs (384 arms). A
 one-repetition run has 96 pairs and is explicitly identified in its manifest.
 
-| Family | Scenarios |
-| --- | --- |
-| Repository inspection | `nested-symbols`; `dependency-order`; `filtered-inventory` |
-| Structured data | `grouped-totals`; `relational-join`; `time-windows` |
-| Text processing | `unicode-records`; `quoted-records`; `multiline-records` |
-| Process orchestration | `batch-children`; `stdin-argv`; `child-failure-recovery` |
-| Diagnostics | `severity-counts`; `request-correlation`; `test-diagnostics` |
-| Repair and migration | `config-migration`; `constrained-repair`; `config-precedence` |
-| Bounded output | `large-log`; `frequency-topk`; `multifile-aggregate` |
-| Recovery | `checkpoint-replay`; `idempotent-updates`; `transaction-reconcile` |
+| Family                | Scenarios                                                          |
+| --------------------- | ------------------------------------------------------------------ |
+| Repository inspection | `nested-symbols`; `dependency-order`; `filtered-inventory`         |
+| Structured data       | `grouped-totals`; `relational-join`; `time-windows`                |
+| Text processing       | `unicode-records`; `quoted-records`; `multiline-records`           |
+| Process orchestration | `batch-children`; `stdin-argv`; `child-failure-recovery`           |
+| Diagnostics           | `severity-counts`; `request-correlation`; `test-diagnostics`       |
+| Repair and migration  | `config-migration`; `constrained-repair`; `config-precedence`      |
+| Bounded output        | `large-log`; `frequency-topk`; `multifile-aggregate`               |
+| Recovery              | `checkpoint-replay`; `idempotent-updates`; `transaction-reconcile` |
 
 Variants change content and size rather than merely renaming a task. The program
 contract fixes file names, types, ordering, duplicate handling and error rules.

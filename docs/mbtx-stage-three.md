@@ -277,17 +277,17 @@ stage-two implementation.
 
 The macOS ARM64 implementation check on 2026-09-16 passed:
 
-| Check | Observed result |
-| --- | --- |
-| Shared MoonBit model | 13 tests passed, including oracle, missing-evidence, failure classification and population rules. |
-| Scoped Rust packages | 71 tests passed across the adapter, MBTX extension and native rollout trace packages. |
-| Real Codex fixed replay | 16 successful arms, eight comparable pairs, two accepted logical steps per arm. These trajectories were prescribed. |
-| Local HTTP faults | Eight arms covering 429, 500, disconnect and missing terminal SSE events; all retained as external failures. |
-| Collector interruption | Actual SIGKILL preserved one censored attempt and produced a partial report with zero comparable pairs. |
-| Recorded-response execution | All 16 arms succeeded in new workspaces using the saved response bodies and protocol headers. |
-| Reconstruction and resume | Reconstructed JSON was byte-identical; completed resume added no attempts or model requests. |
-| Build reuse | A second unchanged preparation verified the existing bundle without compilation. |
-| Official OTLP receiver | Collector contrib 0.139.0 accepted 57 batches: 12,219 spans, including 16 attempt spans and 32 logical steps, plus 280 log records. |
+| Check                       | Observed result                                                                                                                     |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Shared MoonBit model        | 13 tests passed, including oracle, missing-evidence, failure classification and population rules.                                   |
+| Scoped Rust packages        | 71 tests passed across the adapter, MBTX extension and native rollout trace packages.                                               |
+| Real Codex fixed replay     | 16 successful arms, eight comparable pairs, two accepted logical steps per arm. These trajectories were prescribed.                 |
+| Local HTTP faults           | Eight arms covering 429, 500, disconnect and missing terminal SSE events; all retained as external failures.                        |
+| Collector interruption      | Actual SIGKILL preserved one censored attempt and produced a partial report with zero comparable pairs.                             |
+| Recorded-response execution | All 16 arms succeeded in new workspaces using the saved response bodies and protocol headers.                                       |
+| Reconstruction and resume   | Reconstructed JSON was byte-identical; completed resume added no attempts or model requests.                                        |
+| Build reuse                 | A second unchanged preparation verified the existing bundle without compilation.                                                    |
+| Official OTLP receiver      | Collector contrib 0.139.0 accepted 57 batches: 12,219 spans, including 16 attempt spans and 32 logical steps, plus 280 log records. |
 
 The offline validation run was `run-1789533732520`, using bundle fingerprint
 `460274bc969cca68434c4c093ed6086324f8353f`. The evidence remains in the local ignored
@@ -299,15 +299,15 @@ standard OTLP retained for independent tools; no SigNoz installation is planned.
 
 The protocol-v2 correction was checked separately on macOS ARM64 on 2026-09-16:
 
-| Check | Observed result |
-| --- | --- |
-| Pure models and scoped Rust packages | 15 MoonBit tests and 75 Rust tests passed. |
-| Real Codex execution | All 16 fixed-response arms and all 16 recorded-response arms passed their independent file oracles. |
-| Tool and context isolation | Captured task requests exposed the assigned execution interface and common tools, without delegation or inherited repository/skill instructions. |
-| Compiler diagnostic pressure | A real successful build with repeated warnings preserved the runtime marker and reported diagnostic truncation. The exact model-visible file/JSON/child-process example also executed successfully. |
-| Faults, interruption and reproducibility | Eight external-fault arms, SIGKILL recovery, deterministic reconstruction, immutable resume and unchanged-bundle reuse passed again. |
-| Archived pilot accounting | Reanalysis of the recovered Linux attempt records identified 79 MBTX compilation failures and eight Shell command failures. Original evidence and oracle verdicts were not changed. |
-| Evidence transfer | Complete compressed archives passed checksum verification; an existing archive was refused without modifying its checksum. |
+| Check                                    | Observed result                                                                                                                                                                                     |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pure models and scoped Rust packages     | 15 MoonBit tests and 75 Rust tests passed.                                                                                                                                                          |
+| Real Codex execution                     | All 16 fixed-response arms and all 16 recorded-response arms passed their independent file oracles.                                                                                                 |
+| Tool and context isolation               | Captured task requests exposed the assigned execution interface and common tools, without delegation or inherited repository/skill instructions.                                                    |
+| Compiler diagnostic pressure             | A real successful build with repeated warnings preserved the runtime marker and reported diagnostic truncation. The exact model-visible file/JSON/child-process example also executed successfully. |
+| Faults, interruption and reproducibility | Eight external-fault arms, SIGKILL recovery, deterministic reconstruction, immutable resume and unchanged-bundle reuse passed again.                                                                |
+| Archived pilot accounting                | Reanalysis of the recovered Linux attempt records identified 79 MBTX compilation failures and eight Shell command failures. Original evidence and oracle verdicts were not changed.                 |
+| Evidence transfer                        | Complete compressed archives passed checksum verification; an existing archive was refused without modifying its checksum.                                                                          |
 
 The full offline run was `run-1789544721282`, with bundle
 `50c4111e7aa87005f507b342192a04bc3e3fb539`. Subsequent accounting checks covered
