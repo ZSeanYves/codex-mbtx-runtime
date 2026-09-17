@@ -89,6 +89,7 @@ enum ProcessHandle {
 /// Unified wrapper over directly spawned PTY sessions and exec-server-backed
 /// processes.
 pub(crate) struct UnifiedExecProcess {
+    pub(super) archives: super::output_archive::Archives,
     process_handle: ProcessHandle,
     output_tx: broadcast::Sender<Vec<u8>>,
     output: OutputHandles,
@@ -132,6 +133,7 @@ impl UnifiedExecProcess {
         let (state_tx, state_rx) = watch::channel(ProcessState::default());
 
         Self {
+            archives: Default::default(),
             process_handle,
             output_tx,
             output,
@@ -340,10 +342,18 @@ impl UnifiedExecProcess {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) async fn from_spawned(
         spawned: SpawnedPty,
         sandbox_type: SandboxType,
         spawn_lifecycle: SpawnLifecycleHandle,
+    ) -> Result<Self, UnifiedExecError> {
+        Self::from_spawned_observed(spawned, sandbox_type, spawn_lifecycle, Default::default()).await
+    }
+
+    pub(super) async fn from_spawned_observed(
+        spawned: SpawnedPty, sandbox_type: SandboxType, spawn_lifecycle: SpawnLifecycleHandle,
+        archives: super::output_archive::Archives,
     ) -> Result<Self, UnifiedExecError> {
         let SpawnedPty {
             session: process_handle,
@@ -351,7 +361,8 @@ impl UnifiedExecProcess {
             stderr_rx,
             mut exit_rx,
         } = spawned;
-        let output_rx = codex_utils_pty::combine_output_receivers(stdout_rx, stderr_rx);
+        let observer = (!archives.0.is_empty()).then(|| Box::new(archives.clone()) as Box<dyn codex_utils_pty::OutputObserver>);
+        let output_rx = codex_utils_pty::combine_output_receivers_observed(stdout_rx, stderr_rx, observer);
         let mut managed = Self::new(
             ProcessHandle::Local(Box::new(process_handle)),
             sandbox_type,
@@ -362,6 +373,7 @@ impl UnifiedExecProcess {
             managed.output_handles().clone(),
             managed.output_tx.clone(),
         ));
+        managed.archives = archives;
 
         match exit_rx.try_recv() {
             Ok(exit_code) => {
@@ -397,8 +409,15 @@ impl UnifiedExecProcess {
         Ok(managed)
     }
 
+    #[cfg(test)]
     pub(super) async fn from_exec_server_started(
         started: StartedExecProcess,
+    ) -> Result<Self, UnifiedExecError> {
+        Self::from_exec_server_started_observed(started, Default::default()).await
+    }
+
+    pub(super) async fn from_exec_server_started_observed(
+        started: StartedExecProcess, archives: super::output_archive::Archives,
     ) -> Result<Self, UnifiedExecError> {
         let process_handle = ProcessHandle::ExecServer(Arc::clone(&started.process));
         // Older peers do not report this field. In that case, skip local
@@ -411,7 +430,9 @@ impl UnifiedExecProcess {
             output_handles,
             managed.output_tx.clone(),
             managed.state_tx.clone(),
+            archives.clone(),
         ));
+        managed.archives = archives;
 
         let mut state_rx = managed.state_rx.clone();
         if tokio::time::timeout(EARLY_EXIT_GRACE_PERIOD, async {
@@ -439,6 +460,7 @@ impl UnifiedExecProcess {
         output_handles: OutputHandles,
         output_tx: broadcast::Sender<Vec<u8>>,
         state_tx: watch::Sender<ProcessState>,
+        archives: super::output_archive::Archives,
     ) -> JoinHandle<()> {
         let OutputHandles {
             output_buffer,
@@ -515,7 +537,11 @@ impl UnifiedExecProcess {
                         failure,
                         sandbox_denied,
                     } = response;
+                    let mut recovered_seq = last_seq;
                     for chunk in chunks.into_iter().filter(|chunk| chunk.seq > last_seq) {
+                        if chunk.seq > recovered_seq.saturating_add(1) { archives.gap(); }
+                        recovered_seq = chunk.seq;
+                        archives.observe(chunk.stream, &chunk.chunk.0);
                         let bytes = chunk.chunk.into_inner();
                         let mut guard = output_buffer.lock().await;
                         guard.push_chunk(&bytes);
@@ -542,6 +568,7 @@ impl UnifiedExecProcess {
                         });
                     }
                     if closed {
+                        archives.finish();
                         output_closed.store(true, Ordering::Release);
                         output_closed_notify.notify_waiters();
                         cancellation_token.cancel();
@@ -559,6 +586,7 @@ impl UnifiedExecProcess {
                             continue;
                         }
                         last_seq = chunk.seq;
+                        archives.observe(chunk.stream, &chunk.chunk.0);
                         let bytes = chunk.chunk.into_inner();
                         let mut guard = output_buffer.lock().await;
                         guard.push_chunk(&bytes);
@@ -583,6 +611,7 @@ impl UnifiedExecProcess {
                         if seq <= last_seq {
                             continue;
                         }
+                        archives.finish();
                         output_closed.store(true, Ordering::Release);
                         output_closed_notify.notify_waiters();
                         cancellation_token.cancel();

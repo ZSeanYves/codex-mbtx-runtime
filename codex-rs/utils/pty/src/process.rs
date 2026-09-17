@@ -318,8 +318,25 @@ fn resize_raw_pty(raw_fd: RawFd, size: TerminalSize) -> anyhow::Result<()> {
 
 /// Combine split stdout/stderr receivers into a single broadcast receiver.
 pub fn combine_output_receivers(
+    stdout_rx: mpsc::Receiver<Vec<u8>>,
+    stderr_rx: mpsc::Receiver<Vec<u8>>,
+) -> broadcast::Receiver<Vec<u8>> {
+    combine_output_receivers_observed(stdout_rx, stderr_rx, None)
+}
+
+/// Host observer invoked before merging streams; it must not alter child output.
+pub trait OutputObserver: Send + 'static {
+    fn stdout(&mut self, bytes: &[u8]);
+    fn stderr(&mut self, bytes: &[u8]);
+    fn stdout_eof(&mut self);
+    fn stderr_eof(&mut self);
+}
+
+/// The ordinary combiner with optional lossless observation before broadcasting.
+pub fn combine_output_receivers_observed(
     mut stdout_rx: mpsc::Receiver<Vec<u8>>,
     mut stderr_rx: mpsc::Receiver<Vec<u8>>,
+    mut observer: Option<Box<dyn OutputObserver>>,
 ) -> broadcast::Receiver<Vec<u8>> {
     let (combined_tx, combined_rx) = broadcast::channel(256);
     tokio::spawn(async move {
@@ -330,17 +347,21 @@ pub fn combine_output_receivers(
             tokio::select! {
                 stdout = stdout_rx.recv(), if stdout_open => match stdout {
                     Some(chunk) => {
+                        if let Some(observer) = &mut observer { observer.stdout(&chunk); }
                         let _ = combined_tx.send(chunk);
                     }
                     None => {
+                        if let Some(observer) = &mut observer { observer.stdout_eof(); }
                         stdout_open = false;
                     }
                 },
                 stderr = stderr_rx.recv(), if stderr_open => match stderr {
                     Some(chunk) => {
+                        if let Some(observer) = &mut observer { observer.stderr(&chunk); }
                         let _ = combined_tx.send(chunk);
                     }
                     None => {
+                        if let Some(observer) = &mut observer { observer.stderr_eof(); }
                         stderr_open = false;
                     }
                 },

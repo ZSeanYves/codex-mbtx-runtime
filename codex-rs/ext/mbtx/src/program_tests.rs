@@ -23,6 +23,7 @@ fn escaped_output_fits_the_response_budget_without_fabricating_observations() {
             stdout_truncated: false,
             stderr_truncated: false,
             duration_ms: 12,
+            resources: vec![],
         }),
     };
     result.fit_response(1024).expect("bounded result");
@@ -55,6 +56,7 @@ fn successful_compiler_warnings_do_not_evict_runtime_output() {
         stdout_truncated: false,
         stderr_truncated: false,
         duration_ms: 1,
+        resources: vec![],
     };
     let mut result = ProgramResult {
         status: "success",

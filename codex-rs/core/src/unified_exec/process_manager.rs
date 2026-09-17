@@ -822,6 +822,7 @@ impl UnifiedExecProcessManager {
 
         let response = ExecCommandToolOutput {
             event_call_id: context.call_id.clone(),
+            output_resources: process.archives.receipts(),
             chunk_id,
             wall_time,
             raw_output: collected,
@@ -1094,6 +1095,7 @@ impl UnifiedExecProcessManager {
 
         let response = ExecCommandToolOutput {
             event_call_id,
+            output_resources: process.archives.receipts(),
             chunk_id,
             wall_time,
             raw_output: collected,
@@ -1319,6 +1321,7 @@ impl UnifiedExecProcessManager {
         environment: &codex_exec_server::Environment,
     ) -> Result<UnifiedExecProcess, UnifiedExecError> {
         let inherited_fds = spawn_lifecycle.inherited_fds();
+        let archives = super::output_archive::Archives::create(tool_ctx, tty)?;
 
         if environment.is_remote() || request.exec_server_shell_snapshot.is_some() {
             if !inherited_fds.is_empty() {
@@ -1354,7 +1357,7 @@ impl UnifiedExecProcessManager {
             }
             .map_err(|err| UnifiedExecError::create_process(err.to_string()))?;
             spawn_lifecycle.after_spawn();
-            return UnifiedExecProcess::from_exec_server_started(started).await;
+            return UnifiedExecProcess::from_exec_server_started_observed(started, archives).await;
         }
 
         // TODO(anp): Keep PathUri through the local PTY/process launch boundary.
@@ -1427,7 +1430,7 @@ impl UnifiedExecProcessManager {
         spawn_lifecycle.after_spawn();
         let spawned =
             spawn_result.map_err(|err| UnifiedExecError::create_process(err.to_string()))?;
-        UnifiedExecProcess::from_spawned(spawned, request.sandbox, spawn_lifecycle).await
+        UnifiedExecProcess::from_spawned_observed(spawned, request.sandbox, spawn_lifecycle, archives).await
     }
 
     #[tracing::instrument(

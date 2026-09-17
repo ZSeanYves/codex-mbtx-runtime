@@ -136,3 +136,20 @@ async fn bounded_capture_keeps_overflow_marker_and_continues_to_eof() {
         (Some(0), vec![b'x'; 33], vec![b'y'; 33])
     );
 }
+
+#[tokio::test]
+async fn full_stream_archives_survive_bounded_previews() {
+    let directory = tempfile::tempdir().unwrap();
+    let archives: Vec<_> = ["stdout", "stderr"].into_iter()
+        .map(|stream| OutputArchive::create(directory.path(), "call", "run", stream).unwrap()).collect();
+    let raw = stream_capture::ARCHIVES.scope(archives.clone(), consume(
+        command("i=0; while [ $i -lt 1000 ]; do printf 'snow 雪\\n'; printf 'diagnostic λ\\n' >&2; i=$((i+1)); done; printf tail >&2").unwrap(),
+        ExecExpiration::from(5000), 32,
+    )).await.unwrap();
+    assert_eq!(raw.stdout.text.len(), 33);
+    assert_eq!(raw.stderr.text.len(), 33);
+    let receipts: Vec<_> = archives.iter().map(OutputArchive::receipt).collect();
+    assert!(receipts.iter().all(|r| r.complete && r.eof));
+    let stderr = std::fs::read(directory.path().join(format!("{}.data", receipts[1].resource_id))).unwrap();
+    assert_eq!(stderr, ("diagnostic λ\n".repeat(1000) + "tail").as_bytes());
+}

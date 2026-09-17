@@ -44,6 +44,7 @@ fn toolchain() -> Result<MbtxConfig> {
                         .join(".moon/cache/deps")
                 }),
         )?),
+        ..Default::default()
     };
     settings.validate()?;
     Ok(settings)

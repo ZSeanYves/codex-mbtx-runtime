@@ -59,6 +59,7 @@ use codex_utils_pty::DEFAULT_OUTPUT_BYTES_CAP;
 use codex_utils_pty::process_group::kill_child_process_group;
 
 mod bounded;
+mod stream_capture;
 pub(crate) use bounded::execute_bounded_request;
 
 pub const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10_000;

@@ -391,6 +391,7 @@ async fn mbtx_compiler_repair_is_a_new_model_decision() -> Result<()> {
         dependency_cache: Some(AbsolutePathBuf::from_absolute_path(
             PathBuf::from(std::env::var_os("HOME").context("HOME")?).join(".moon/cache/deps"),
         )?),
+        ..Default::default()
     };
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
     codex_mbtx_extension::install(&mut extensions, |config: &Config| config.mbtx.clone());

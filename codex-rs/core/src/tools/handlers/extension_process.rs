@@ -74,7 +74,7 @@ impl ToolProcessExecutor for CoreProcessExecutor {
             if request.command.is_empty()
                 || request.timeout_ms == 0
                 || request.timeout_ms > 120_000
-                || request.max_output_bytes > 4096
+                || request.max_output_bytes > 65536
             {
                 return Err("invalid bounded process request".into());
             }
@@ -229,7 +229,12 @@ impl ToolRuntime<ProcessRequest, ToolProcessOutput> for ProcessRuntime {
                 Some(&req.process.environment_id),
             )
             .map_err(ToolError::Codex)?;
-        execute_bounded_request(exec, req.process.max_output_bytes)
+        let archives = if let Some(root) = &ctx.step_context.turn.config.mbtx.output_directory {
+            ["stdout", "stderr"].into_iter().map(|stream|
+                codex_tools::output_archive::OutputArchive::create(root, &ctx.call_id, req.process.phase, stream)
+            ).collect::<std::io::Result<Vec<_>>>().map_err(|error| ToolError::Rejected(format!("cannot prepare output evidence: {error}")))?
+        } else { vec![] };
+        execute_bounded_request(exec, req.process.max_output_bytes, archives)
             .await
             .map_err(ToolError::Codex)
     }

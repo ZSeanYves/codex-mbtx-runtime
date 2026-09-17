@@ -11,8 +11,12 @@ pub struct MbtxConfig {
     pub enabled: bool,
     pub moon: Option<AbsolutePathBuf>,
     pub moonrun: Option<AbsolutePathBuf>,
-    /// Preinstalled MoonBit dependency-source cache; copied into invocation scratch.
+    /// Preinstalled MoonBit dependency-source cache; copied once per session.
     pub dependency_cache: Option<AbsolutePathBuf>,
+    /// Trusted read-only reference documents, available to both execution interfaces.
+    pub reference_directory: Option<AbsolutePathBuf>,
+    /// Host-owned full-output archive, outside task-writable roots.
+    pub output_directory: Option<AbsolutePathBuf>,
 }
 
 impl MbtxConfig {

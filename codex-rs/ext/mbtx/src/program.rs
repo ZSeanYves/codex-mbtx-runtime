@@ -210,6 +210,7 @@ pub(crate) async fn execute(
                 timeout_ms: input.build_timeout_ms.unwrap_or(60_000).clamp(1, 120_000),
                 max_output_bytes: budget,
                 description: "Compile submitted MBTX program under current permissions".into(),
+                phase: "build",
                 env_overrides: [
                     ("MOON_DEP_CACHE".into(), native(&local_cache)?),
                     (
@@ -279,6 +280,7 @@ pub(crate) async fn execute(
                 timeout_ms: input.run_timeout_ms.unwrap_or(10_000).clamp(1, 60_000),
                 max_output_bytes: remaining,
                 description: "Execute submitted MBTX program under current permissions".into(),
+                phase: "run",
                 env_overrides: Default::default(),
             })
             .await?;

@@ -368,6 +368,7 @@ impl ToolOutput for AbortedToolOutput {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecCommandToolOutput {
+    pub output_resources: Vec<codex_tools::output_archive::OutputResource>,
     pub event_call_id: String,
     pub chunk_id: String,
     pub wall_time: Duration,
@@ -534,6 +535,9 @@ impl ExecCommandToolOutput {
         }
 
         sections.push("Output:".to_string());
+        if !self.output_resources.is_empty() {
+            sections.insert(sections.len() - 1, format!("Full output resources (read_resource): {}", self.output_resources.iter().map(|r| format!("{}={}", r.stream, r.resource_id)).collect::<Vec<_>>().join(", ")));
+        }
         sections.join("\n")
     }
 

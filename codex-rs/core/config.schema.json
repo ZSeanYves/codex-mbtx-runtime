@@ -2093,7 +2093,7 @@
               "$ref": "#/definitions/AbsolutePathBuf"
             }
           ],
-          "description": "Preinstalled MoonBit dependency-source cache; copied into invocation scratch."
+          "description": "Preinstalled MoonBit dependency-source cache; copied once per session."
         },
         "enabled": {
           "default": false,
@@ -2104,6 +2104,22 @@
         },
         "moonrun": {
           "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "output_directory": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Host-owned full-output archive, outside task-writable roots."
+        },
+        "reference_directory": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Trusted read-only reference documents, available to both execution interfaces."
         }
       },
       "type": "object"
