@@ -570,6 +570,7 @@ fn managed_proxy_inner_command_includes_route_spec() {
             permission_profile: &permission_profile,
             managed_network: Some(managed_network.clone()),
             proxy_route_spec: Some("{\"routes\":[]}".to_string()),
+            allow_unix_sockets: &[],
             command: vec!["/bin/true".to_string()],
         });
 
@@ -579,6 +580,32 @@ fn managed_proxy_inner_command_includes_route_spec() {
             .expect("inner command should preserve the managed network policy");
         assert_eq!(parsed.managed_network, Some(managed_network));
     }
+}
+
+#[test]
+fn inner_command_forwards_explicit_unix_socket_paths() {
+    let permission_profile = read_only_permission_profile();
+    let socket = PathBuf::from("/tmp/codex-worker/s");
+    let args = build_inner_seccomp_command(InnerSeccompCommandArgs {
+        sandbox_policy_cwd: Path::new("/tmp"),
+        command_cwd: Some(Path::new("/tmp/link")),
+        permission_profile: &permission_profile,
+        managed_network: None,
+        proxy_route_spec: None,
+        allow_unix_sockets: &[socket],
+        command: vec!["/bin/true".to_string()],
+    });
+
+    assert!(
+        args.windows(2)
+            .any(|window| { window == ["--allow-unix-socket", "/tmp/codex-worker/s"] })
+    );
+    let parsed = LandlockCommand::try_parse_from(args)
+        .expect("inner command should preserve explicit Unix socket paths");
+    assert_eq!(
+        parsed.allow_unix_sockets,
+        vec![PathBuf::from("/tmp/codex-worker/s")]
+    );
 }
 
 #[test]
@@ -623,6 +650,7 @@ fn inner_command_includes_permission_profile_flag() {
         permission_profile: &permission_profile,
         managed_network: None,
         proxy_route_spec: None,
+        allow_unix_sockets: &[],
         command: vec!["/bin/true".to_string()],
     });
 
@@ -642,6 +670,7 @@ fn non_managed_inner_command_omits_route_spec() {
         permission_profile: &permission_profile,
         managed_network: None,
         proxy_route_spec: None,
+        allow_unix_sockets: &[],
         command: vec!["/bin/true".to_string()],
     });
 
@@ -661,6 +690,7 @@ fn managed_proxy_inner_command_requires_route_spec() {
             permission_profile: &permission_profile,
             managed_network: Some(ManagedNetworkSandboxContext::default()),
             proxy_route_spec: None,
+            allow_unix_sockets: &[],
             command: vec!["/bin/true".to_string()],
         })
     });

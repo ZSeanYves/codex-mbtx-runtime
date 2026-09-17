@@ -1,5 +1,6 @@
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_protocol::models::PermissionProfile;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use std::path::Path;
 
 /// Basename used when the Codex executable self-invokes as the Linux sandbox
@@ -31,6 +32,29 @@ pub fn create_linux_sandbox_command_args_for_permission_profile(
     use_legacy_landlock: bool,
     managed_network: Option<&ManagedNetworkSandboxContext>,
 ) -> Vec<String> {
+    create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets(
+        command,
+        command_cwd,
+        permission_profile,
+        sandbox_policy_cwd,
+        use_legacy_landlock,
+        managed_network,
+        &[],
+    )
+}
+
+/// As above, while passing explicit AF_UNIX paths through to the Linux
+/// helper. The helper uses the paths to enable the narrow Unix-socket mode;
+/// filesystem visibility remains the path-level boundary.
+pub fn create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets(
+    command: Vec<String>,
+    command_cwd: &Path,
+    permission_profile: &PermissionProfile,
+    sandbox_policy_cwd: &Path,
+    use_legacy_landlock: bool,
+    managed_network: Option<&ManagedNetworkSandboxContext>,
+    allow_unix_sockets: &[AbsolutePathBuf],
+) -> Vec<String> {
     let permission_profile_json = serde_json::to_string(permission_profile)
         .unwrap_or_else(|err| panic!("failed to serialize permission profile: {err}"));
     let sandbox_policy_cwd = sandbox_policy_cwd
@@ -60,6 +84,10 @@ pub fn create_linux_sandbox_command_args_for_permission_profile(
             serde_json::to_string(managed_network)
                 .unwrap_or_else(|err| panic!("failed to serialize managed network context: {err}")),
         );
+    }
+    for socket in allow_unix_sockets {
+        linux_cmd.push("--allow-unix-socket".to_string());
+        linux_cmd.push(socket.to_string_lossy().into_owned());
     }
     linux_cmd.push("--".to_string());
     linux_cmd.extend(command);

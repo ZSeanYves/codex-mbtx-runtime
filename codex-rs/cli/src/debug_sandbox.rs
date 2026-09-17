@@ -23,7 +23,7 @@ use codex_protocol::config_types::SandboxMode;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::permissions::NetworkSandboxPolicy;
-use codex_sandboxing::landlock::create_linux_sandbox_command_args_for_permission_profile;
+use codex_sandboxing::landlock::create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets;
 #[cfg(target_os = "macos")]
 use codex_sandboxing::seatbelt::CreateSeatbeltCommandArgsParams;
 #[cfg(target_os = "macos")]
@@ -102,6 +102,7 @@ pub async fn run_command_under_landlock(
         config_profile: _,
         cwd,
         include_managed_config,
+        allow_unix_sockets,
         config_overrides,
         command,
     } = command;
@@ -122,7 +123,7 @@ pub async fn run_command_under_landlock(
         codex_linux_sandbox_exe,
         SandboxType::Landlock,
         /*log_denials*/ false,
-        &[],
+        &allow_unix_sockets,
     )
     .await
 }
@@ -430,13 +431,14 @@ async fn run_command_under_sandbox(
             } else {
                 (env, None)
             };
-            let args = create_linux_sandbox_command_args_for_permission_profile(
+            let args = create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets(
                 command,
                 cwd.as_path(),
                 &runtime_permission_profile,
                 sandbox_policy_cwd.as_path(),
                 use_legacy_landlock,
                 managed_network.as_ref(),
+                &allow_unix_sockets,
             );
             spawn_debug_sandbox_child(
                 codex_linux_sandbox_exe,

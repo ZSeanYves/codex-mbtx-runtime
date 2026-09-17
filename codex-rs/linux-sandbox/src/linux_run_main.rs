@@ -136,6 +136,12 @@ pub struct LandlockCommand {
     #[arg(long = "proxy-route-spec", hide = true)]
     pub proxy_route_spec: Option<String>,
 
+    /// Explicit AF_UNIX paths permitted by the caller. Filesystem visibility
+    /// remains the path boundary; this flag only prevents seccomp from
+    /// rejecting the socket syscalls needed for local IPC.
+    #[arg(long = "allow-unix-socket", hide = true)]
+    pub allow_unix_sockets: Vec<PathBuf>,
+
     /// Inherited fallback mounts that must be authenticated before sandboxed code runs.
     #[arg(long = "verify-fd-mount", hide = true)]
     pub verify_fd_mounts: Vec<String>,
@@ -167,6 +173,7 @@ pub fn run_main() -> ! {
         apply_seccomp_then_exec,
         managed_network,
         proxy_route_spec,
+        allow_unix_sockets,
         verify_fd_mounts,
         no_proc,
         command,
@@ -240,6 +247,7 @@ pub fn run_main() -> ! {
             /*apply_landlock_fs*/ false,
             managed_network.as_ref(),
             proxy_routing_active,
+            /*allow_unix_sockets*/ !allow_unix_sockets.is_empty(),
         ) {
             panic!("error applying Linux sandbox restrictions: {e:?}");
         }
@@ -286,6 +294,7 @@ pub fn run_main() -> ! {
             /*apply_landlock_fs*/ false,
             managed_network.as_ref(),
             /*proxy_routing_active*/ false,
+            /*allow_unix_sockets*/ !allow_unix_sockets.is_empty(),
         ) {
             panic!("error applying Linux sandbox restrictions: {e:?}");
         }
@@ -309,6 +318,7 @@ pub fn run_main() -> ! {
             permission_profile: &permission_profile,
             managed_network,
             proxy_route_spec,
+            allow_unix_sockets: &allow_unix_sockets,
             command,
         });
         run_bwrap_with_proc_fallback(
@@ -329,6 +339,7 @@ pub fn run_main() -> ! {
         /*apply_landlock_fs*/ true,
         managed_network.as_ref(),
         /*proxy_routing_active*/ false,
+        /*allow_unix_sockets*/ !allow_unix_sockets.is_empty(),
     ) {
         panic!("error applying legacy Linux sandbox restrictions: {e:?}");
     }
@@ -1530,6 +1541,7 @@ struct InnerSeccompCommandArgs<'a> {
     permission_profile: &'a PermissionProfile,
     managed_network: Option<ManagedNetworkSandboxContext>,
     proxy_route_spec: Option<String>,
+    allow_unix_sockets: &'a [PathBuf],
     command: Vec<String>,
 }
 
@@ -1541,6 +1553,7 @@ fn build_inner_seccomp_command(args: InnerSeccompCommandArgs<'_>) -> Vec<String>
         permission_profile,
         managed_network,
         proxy_route_spec,
+        allow_unix_sockets,
         command,
     } = args;
     let current_exe = match std::env::current_exe() {
@@ -1576,6 +1589,10 @@ fn build_inner_seccomp_command(args: InnerSeccompCommandArgs<'_>) -> Vec<String>
             .unwrap_or_else(|| panic!("managed proxy mode requires a proxy route spec"));
         inner.push("--proxy-route-spec".to_string());
         inner.push(proxy_route_spec);
+    }
+    for socket in allow_unix_sockets {
+        inner.push("--allow-unix-socket".to_string());
+        inner.push(socket.to_string_lossy().into_owned());
     }
     inner.push("--".to_string());
     inner.extend(command);

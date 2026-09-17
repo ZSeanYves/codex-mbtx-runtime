@@ -46,6 +46,7 @@ pub(crate) fn apply_permission_profile_to_current_thread(
     apply_landlock_fs: bool,
     managed_network: Option<&ManagedNetworkSandboxContext>,
     proxy_routing_active: bool,
+    allow_unix_sockets: bool,
 ) -> Result<()> {
     let (file_system_sandbox_policy, network_sandbox_policy) =
         permission_profile.to_runtime_permissions();
@@ -74,7 +75,11 @@ pub(crate) fn apply_permission_profile_to_current_thread(
     }
 
     if let Some(mode) = network_seccomp_mode {
-        install_network_seccomp_filter_on_current_thread(mode, managed_network)?;
+        install_network_seccomp_filter_on_current_thread(
+            mode,
+            managed_network,
+            allow_unix_sockets,
+        )?;
     }
 
     if apply_landlock_fs && !file_system_sandbox_policy.has_full_disk_write_access() {
@@ -179,6 +184,7 @@ fn install_filesystem_landlock_rules_on_current_thread(
 fn install_network_seccomp_filter_on_current_thread(
     mode: NetworkSeccompMode,
     managed_network: Option<&ManagedNetworkSandboxContext>,
+    allow_unix_sockets: bool,
 ) -> std::result::Result<(), SandboxErr> {
     fn deny_syscall(rules: &mut BTreeMap<i64, Vec<SeccompRule>>, nr: i64) {
         rules.insert(nr, vec![]); // empty rule vec = unconditional match
@@ -200,23 +206,25 @@ fn install_network_seccomp_filter_on_current_thread(
 
     match mode {
         NetworkSeccompMode::Restricted => {
-            deny_syscall(&mut rules, libc::SYS_connect);
-            deny_syscall(&mut rules, libc::SYS_accept);
-            deny_syscall(&mut rules, libc::SYS_accept4);
-            deny_syscall(&mut rules, libc::SYS_bind);
-            deny_syscall(&mut rules, libc::SYS_listen);
-            deny_syscall(&mut rules, libc::SYS_getpeername);
-            deny_syscall(&mut rules, libc::SYS_getsockname);
-            deny_syscall(&mut rules, libc::SYS_shutdown);
-            deny_syscall(&mut rules, libc::SYS_sendto);
-            deny_syscall(&mut rules, libc::SYS_sendmmsg);
-            // NOTE: allowing recvfrom allows some tools like: `cargo clippy`
-            // to run with their socketpair + child processes for sub-proc
-            // management.
-            // deny_syscall(&mut rules, libc::SYS_recvfrom);
-            deny_syscall(&mut rules, libc::SYS_recvmmsg);
-            deny_syscall(&mut rules, libc::SYS_getsockopt);
-            deny_syscall(&mut rules, libc::SYS_setsockopt);
+            if !allow_unix_sockets {
+                deny_syscall(&mut rules, libc::SYS_connect);
+                deny_syscall(&mut rules, libc::SYS_accept);
+                deny_syscall(&mut rules, libc::SYS_accept4);
+                deny_syscall(&mut rules, libc::SYS_bind);
+                deny_syscall(&mut rules, libc::SYS_listen);
+                deny_syscall(&mut rules, libc::SYS_getpeername);
+                deny_syscall(&mut rules, libc::SYS_getsockname);
+                deny_syscall(&mut rules, libc::SYS_shutdown);
+                deny_syscall(&mut rules, libc::SYS_sendto);
+                deny_syscall(&mut rules, libc::SYS_sendmmsg);
+                // NOTE: allowing recvfrom allows some tools like: `cargo clippy`
+                // to run with their socketpair + child processes for sub-proc
+                // management.
+                // deny_syscall(&mut rules, libc::SYS_recvfrom);
+                deny_syscall(&mut rules, libc::SYS_recvmmsg);
+                deny_syscall(&mut rules, libc::SYS_getsockopt);
+                deny_syscall(&mut rules, libc::SYS_setsockopt);
+            }
 
             // For `socket` we allow AF_UNIX (arg0 == AF_UNIX) and deny
             // everything else.
@@ -249,7 +257,9 @@ fn install_network_seccomp_filter_on_current_thread(
                     libc::AF_INET6 as u64,
                 )?,
             ];
-            if managed_network.is_some_and(|context| context.dangerously_allow_all_unix_sockets) {
+            if allow_unix_sockets
+                || managed_network.is_some_and(|context| context.dangerously_allow_all_unix_sockets)
+            {
                 denied_socket_conditions.push(SeccompCondition::new(
                     0,
                     SeccompCmpArgLen::Dword,

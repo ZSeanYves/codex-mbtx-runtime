@@ -138,6 +138,12 @@ pub struct LandlockCommand {
     )]
     pub include_managed_config: bool,
 
+    /// Allow the sandboxed command to connect to AF_UNIX sockets rooted at
+    /// this path. Linux applies the allowance to Unix sockets only; the
+    /// filesystem profile still determines which socket paths are visible.
+    #[arg(long = "allow-unix-socket", value_parser = parse_absolute_path)]
+    pub allow_unix_sockets: Vec<AbsolutePathBuf>,
+
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 

@@ -80,6 +80,28 @@ fn permission_profile_flag_is_included() {
 }
 
 #[test]
+fn explicit_unix_socket_paths_are_forwarded_to_linux_helper() {
+    let command = vec!["/bin/true".to_string()];
+    let cwd = Path::new("/tmp");
+    let socket = AbsolutePathBuf::from_absolute_path(Path::new("/tmp/mw-test/s")).unwrap();
+    let args = create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets(
+        command,
+        cwd,
+        &PermissionProfile::read_only(),
+        cwd,
+        false,
+        None,
+        &[socket],
+    );
+
+    assert_eq!(
+        args.windows(2)
+            .any(|window| window[0] == "--allow-unix-socket" && window[1] == "/tmp/mw-test/s"),
+        true
+    );
+}
+
+#[test]
 fn proxy_network_requires_managed_requirements() {
     assert_eq!(
         allow_network_for_proxy(/*enforce_managed_network*/ false),
