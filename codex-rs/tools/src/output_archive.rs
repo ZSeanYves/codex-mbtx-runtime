@@ -28,7 +28,7 @@ pub struct OutputResource {
 }
 
 struct StreamState {
-    file: File,
+    file: Option<File>,
     hash: Sha256,
     receipt: OutputResource,
     sealed: bool,
@@ -57,6 +57,18 @@ fn create_private(path: &Path) -> io::Result<File> {
 }
 
 impl OutputArchive {
+    /// Observation setup failure must not prevent the requested program from
+    /// running. The returned receipt remains explicitly incomplete.
+    pub fn capture(root: &Path, call_id: &str, phase: &str, stream: &str) -> Self {
+        match Self::create(root, call_id, phase, stream) {
+            Ok(archive) => archive,
+            Err(error) => Self { root:root.to_owned(), state:Arc::new(Mutex::new(StreamState {
+                file:None, hash:Sha256::new(), sealed:false,
+                receipt:OutputResource { resource_id:Uuid::new_v4().to_string(),call_id:call_id.into(),phase:phase.into(),stream:stream.into(),bytes:0,sha256:None,eof:false,complete:false,error:Some(error.to_string()),write_ns:0,started_unix_ms:unix_ms(),ended_unix_ms:None },
+            })) },
+        }
+    }
+
     pub fn create(root: &Path, call_id: &str, phase: &str, stream: &str) -> io::Result<Self> {
         fs::create_dir_all(root)?;
         let resource_id = Uuid::new_v4().to_string();
@@ -68,7 +80,7 @@ impl OutputArchive {
         let file = create_private(&root.join(format!("{resource_id}.data")))?;
         serde_json::to_writer(create_private(&root.join(format!("{resource_id}.json")))?, &receipt)?;
         Ok(Self { root: root.to_owned(), state: Arc::new(Mutex::new(StreamState {
-            file, hash: Sha256::new(), receipt, sealed: false,
+            file: Some(file), hash: Sha256::new(), receipt, sealed: false,
         })) })
     }
 
@@ -78,7 +90,7 @@ impl OutputArchive {
         if state.sealed { return; }
         state.receipt.bytes += bytes.len() as u64;
         state.hash.update(bytes);
-        if state.receipt.error.is_none() && let Err(error) = state.file.write_all(bytes) {
+        if state.receipt.error.is_none() && let Some(file) = state.file.as_mut() && let Err(error) = file.write_all(bytes) {
             state.receipt.error = Some(error.to_string());
         }
         state.receipt.write_ns += started.elapsed().as_nanos() as u64;
@@ -103,16 +115,17 @@ impl OutputArchive {
     }
 
     fn close(&self, eof: bool) -> OutputResource {
+        let observed_end = unix_ms();
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !state.sealed {
             let started = Instant::now();
-            if let Err(error) = state.file.sync_data() {
+            if let Some(file) = state.file.as_ref() && let Err(error) = file.sync_data() {
                 state.receipt.error.get_or_insert_with(|| error.to_string());
             }
             state.receipt.write_ns += started.elapsed().as_nanos() as u64;
             state.receipt.eof = eof;
             state.receipt.complete = eof && state.receipt.error.is_none();
-            state.receipt.ended_unix_ms = Some(unix_ms());
+            state.receipt.ended_unix_ms = Some(observed_end);
             state.receipt.sha256 = state.receipt.error.is_none().then(|| format!("{:x}", state.hash.clone().finalize()));
             let id = &state.receipt.resource_id;
             let temporary = self.root.join(format!("{id}.partial"));

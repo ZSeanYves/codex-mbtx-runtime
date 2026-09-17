@@ -34,8 +34,13 @@ pub struct RawTraceEvent {
     pub schema_version: u32,
     /// Contiguous writer-assigned order inside one rollout event log.
     pub seq: RawEventSeq,
-    /// Unix wall-clock timestamp in milliseconds. Use for display/latency.
+    /// Unix wall-clock timestamp in milliseconds, for display and correlation.
     pub wall_time_unix_ms: i64,
+    /// Writer-entry monotonic time. Subtract only inside the same clock domain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monotonic_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock_domain: Option<String>,
     pub rollout_id: String,
     pub thread_id: Option<AgentThreadId>,
     pub codex_turn_id: Option<CodexTurnId>,

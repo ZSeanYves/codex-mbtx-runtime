@@ -35,6 +35,8 @@ use crate::raw_event::RawTraceEventPayload;
 #[derive(Debug)]
 pub struct TraceWriter {
     inner: Mutex<TraceWriterInner>,
+    clock: std::time::Instant,
+    clock_domain: String,
 }
 
 #[derive(Debug)]
@@ -72,6 +74,8 @@ impl TraceWriter {
             .with_context(|| format!("open trace event log {}", event_log_path.display()))?;
 
         Ok(Self {
+            clock: std::time::Instant::now(),
+            clock_domain: format!("native-trace:{}", manifest.trace_id),
             inner: Mutex::new(TraceWriterInner {
                 manifest,
                 payloads_dir,
@@ -116,11 +120,16 @@ impl TraceWriter {
         context: RawTraceEventContext,
         payload: RawTraceEventPayload,
     ) -> Result<RawTraceEvent> {
+        // Capture the observed boundary before lock contention, encoding and IO.
+        let wall_time_unix_ms = unix_time_ms();
+        let monotonic_ns = self.clock.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
         let mut inner = self.lock_inner();
         let event = RawTraceEvent {
             schema_version: RAW_TRACE_EVENT_SCHEMA_VERSION,
             seq: inner.next_seq,
-            wall_time_unix_ms: unix_time_ms(),
+            wall_time_unix_ms,
+            monotonic_ns: Some(monotonic_ns),
+            clock_domain: Some(self.clock_domain.clone()),
             rollout_id: inner.manifest.rollout_id.clone(),
             thread_id: context.thread_id,
             codex_turn_id: context.codex_turn_id,

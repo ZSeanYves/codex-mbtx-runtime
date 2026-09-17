@@ -31,6 +31,7 @@ pub(crate) struct ProgramResult {
     pub cache: &'static str,
     pub build_reused_from: Option<String>,
     pub preparation_ms: u64,
+    pub source_resource: Option<codex_tools::output_archive::OutputResource>,
 }
 
 impl ProgramResult {
@@ -101,6 +102,7 @@ pub(crate) async fn execute(
         cache: "miss",
         build_reused_from: None,
         preparation_ms: 0,
+        source_resource: None,
     };
     let outcome = async {
         let preparing = Instant::now();
@@ -155,6 +157,7 @@ pub(crate) async fn execute(
         if source_text.is_empty() || source_text.len() > 65536 {
             return Err("source must contain 1..65536 UTF-8 bytes".into());
         }
+        result.source_resource = executor.archive_source(&source_text);
         let directory = cwd
             .join(&format!(".codex-mbtx/{}", Uuid::new_v4()))
             .map_err(|e| e.to_string())?;

@@ -17,6 +17,9 @@ pub struct MbtxConfig {
     pub reference_directory: Option<AbsolutePathBuf>,
     /// Host-owned full-output archive, outside task-writable roots.
     pub output_directory: Option<AbsolutePathBuf>,
+    /// Explicit host-selected Unix receipt socket. Grants only this IPC path
+    /// to both interfaces; does not enable TCP, DNS or a managed proxy.
+    pub observation_socket: Option<AbsolutePathBuf>,
 }
 
 impl MbtxConfig {

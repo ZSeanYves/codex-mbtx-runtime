@@ -2105,6 +2105,14 @@
         "moonrun": {
           "$ref": "#/definitions/AbsolutePathBuf"
         },
+        "observation_socket": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Explicit host-selected Unix receipt socket. Grants only this IPC path to both interfaces; does not enable TCP, DNS or a managed proxy."
+        },
         "output_directory": {
           "allOf": [
             {

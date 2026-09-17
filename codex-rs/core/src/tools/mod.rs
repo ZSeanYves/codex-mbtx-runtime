@@ -11,6 +11,7 @@ pub(crate) mod hosted_spec;
 pub(crate) mod lifecycle;
 pub(crate) mod network_approval;
 pub(crate) mod orchestrator;
+pub(crate) mod observed_process;
 pub(crate) mod parallel;
 pub(crate) mod registry;
 pub(crate) mod router;

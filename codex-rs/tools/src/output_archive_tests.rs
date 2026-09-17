@@ -37,3 +37,17 @@ fn interrupted_stream_is_not_complete_and_finish_does_not_rewrite_it() -> io::Re
     assert_eq!(read_output(root.path(), &receipt.resource_id, 0, 16)?.text, "prefix");
     Ok(())
 }
+#[test]
+fn archive_failure_retains_observed_bytes_and_marks_incomplete() {
+    let directory = tempfile::tempdir().unwrap();
+    let blocked = directory.path().join("not-a-directory");
+    std::fs::write(&blocked,b"occupied").unwrap();
+    let archive=super::OutputArchive::capture(&blocked,"call","run","stderr");
+    archive.append("diagnostic tail 雪".as_bytes());
+    let receipt=archive.finish();
+    assert_eq!(receipt.bytes,"diagnostic tail 雪".len() as u64);
+    assert!(receipt.eof);
+    assert!(!receipt.complete);
+    assert!(receipt.error.is_some());
+    assert_eq!(receipt.sha256,None);
+}
