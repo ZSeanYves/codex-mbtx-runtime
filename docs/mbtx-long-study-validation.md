@@ -61,6 +61,34 @@ retains all 20 successful pairs and their point estimates, with confidence
 intervals null because within-stratum input coverage is insufficient. Repeated
 executions of one input do not substitute for independent input coverage.
 
+## Bounded recovery follow-up
+
+The recovery change passed 27 MoonBit tests and 22 evaluator Rust tests. Real
+Codex replay then exercised both interfaces with independent HTTP and stream
+limits. Counts below are per arm; none of the exhausted cases reached the wall
+timeout. All requests went to local fixtures, with no provider credentials.
+
+| Case                          | HTTP / stream retry limits | Observed sends | HTTP retries | Stream retries | Terminal outcome |
+| ----------------------------- | -------------------------- | -------------: | -----------: | -------------: | ---------------- |
+| Persistent HTTP 500           | 1 / 0                      |              2 |            1 |              0 | External failure |
+| Persistent disconnect         | 0 / 1                      |              2 |            0 |              1 | External failure |
+| Recovery disabled             | 0 / 0                      |              1 |            0 |              0 | External failure |
+| One HTTP 500, then recovery   | 2 / 2                      |              3 |            1 |              0 | Success          |
+| One disconnect, then recovery | 2 / 2                      |              3 |            0 |              1 | Success          |
+| HTTP 429                      | 2 / 2                      |              1 |            0 |              0 | External failure |
+
+Each recovered arm retained its failed exchange and completed two decisions,
+including the final answer. Recovery added a request, not a decision. Failed
+arms retained null completion steps. The configuration test also verifies that
+both interfaces explicitly disable upstream's unbounded connection recovery.
+
+Evidence: `_build/retry-validation/run-1789676087572`, execution bundle
+`dde9d596182958469e12cc4d9708a7a796d0dbce`. The regression entry is
+`moon run mbtx/scripts/validate-retries.mbtx`, after bundle preparation, and is
+included in full offline validation. The new retry policy is frozen in each run
+manifest; this evidence does not amend earlier results or establish online
+reliability.
+
 ## Observation calibration
 
 Minimal/full/full/minimal conditions each ran two pairs: 16 arms. Both conditions

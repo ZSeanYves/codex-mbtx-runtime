@@ -66,7 +66,7 @@ pub(crate) struct RunArgs {
     #[arg(long)]
     pub replay_source: Option<PathBuf>,
     /// Controlled offline failure; never combined with a real provider.
-    #[arg(long,value_parser=["429","500","disconnect","truncated","stall"],conflicts_with="replay_source")]
+    #[arg(long,value_parser=["429","500","disconnect","truncated","stall","500-once","disconnect-once"],conflicts_with="replay_source")]
     pub replay_fault: Option<String>,
     /// Controlled decision prefix for offline step, resource and cache validation.
     #[arg(long, default_value_t = 0)]
@@ -136,6 +136,16 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         );
     }
     let config = RelayConfig::load(&args.config)?;
+    let provider = config.provider()?;
+    let retry_policy = json!({
+        "request_max_retries":provider.request_max_retries,
+        "stream_max_retries":provider.stream_max_retries,
+        "unbounded_connection_retries":false,
+        "gateway_internal_retries":0,
+        "retry_429":false,
+        "max_http_sends_per_sampling_call":(provider.request_max_retries+1)*(provider.stream_max_retries+1),
+        "scope":"Retries after the initial try, per HTTP request and per logical sampling call; normal task decisions are not capped"
+    });
     let key = if args.mode == "relay" {
         config.credential(args.credentials_file.as_deref())?
     } else {
@@ -239,6 +249,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                 && previous["replay_prefix_turns"].as_u64().unwrap_or(0)
                     == args.replay_prefix_turns as u64
                 && previous["observation"].as_str().unwrap_or("full") == args.observation
+                && previous["retry_policy"] == retry_policy
                 && previous["schedule"] == json!(expected_schedule)
                 && previous["protocol"] == protocol
                 && previous["path"] == path
@@ -279,6 +290,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         manifest["max_wall_seconds"] = json!(args.max_wall_seconds);
         manifest["replay_prefix_turns"] = json!(args.replay_prefix_turns);
         manifest["observation"] = json!(args.observation);
+        manifest["retry_policy"] = retry_policy;
         json_new(&args.output.join("run.json"), &manifest)?;
         write_new(
             &args.output.join("run.sha256"),
@@ -402,7 +414,19 @@ async fn collect_schedule(
                 );
                 Some(replay::recorded(&source_attempt)?)
             } else if let Some(fault) = &args.replay_fault {
-                Some(vec![replay::fault(fault)])
+                let provider = config.provider()?;
+                let replies = if let Some(transient) = fault.strip_suffix("-once") {
+                    let mut replies = vec![replay::fault(transient)];
+                    replies.extend(replay::fixed(task, arm, 0)?);
+                    replies
+                } else {
+                    // Enough evidence for both independently bounded native
+                    // layers; exhausting a fixture is never a relay error.
+                    let sends =
+                        (provider.request_max_retries + 1) * (provider.stream_max_retries + 1);
+                    vec![replay::fault(fault); sends as usize]
+                };
+                Some(replies)
             } else if args.mode == "replay" {
                 Some(replay::fixed(task, arm, args.replay_prefix_turns)?)
             } else {
@@ -446,6 +470,7 @@ async fn collect_schedule(
 
 async fn probe(root: &Path, config: &RelayConfig, gate: &Arc<Gate>) -> Result<bool> {
     let client = reqwest::Client::builder()
+        .retry(reqwest::retry::never())
         .no_proxy()
         .timeout(Duration::from_secs(120))
         .build()?;

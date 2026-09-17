@@ -96,6 +96,9 @@ impl Gate {
             key,
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                // Codex owns the two observable retry counters. A hidden
+                // reqwest resend here would evade both the gate and evidence.
+                .retry(reqwest::retry::never())
                 .timeout(Duration::from_secs(600))
                 .build()?,
             server: Mutex::new(None),

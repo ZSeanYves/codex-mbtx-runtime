@@ -203,6 +203,10 @@ fn study_strata(
         })
         .length()
         .to_json(),
+        "recovered_external_error_arms": members
+        .filter(a => field(a, "external_errors_recovered") == true.to_json())
+        .length()
+        .to_json(),
       }
     }
     let estimate : Map[String, Json] = @json.from_json(

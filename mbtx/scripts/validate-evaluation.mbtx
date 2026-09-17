@@ -6,7 +6,7 @@ import {
 
 async fn main {
   let environment : Map[String,String] = {"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_PROFILE_TEST_DEBUG":"0","CARGO_INCREMENTAL":"0","CARGO_BUILD_JOBS":"4","NO_PROXY":"127.0.0.1,localhost,::1","no_proxy":"127.0.0.1,localhost,::1"}
-  for script in ["prepare-evaluation","collect-study","collect-pilot","validate-long-study","validate-long-fixtures","validate-observation","validate-reference","package-evidence"] {
+  for script in ["prepare-evaluation","collect-study","collect-pilot","validate-long-study","validate-long-fixtures","validate-observation","validate-reference","validate-retries","package-evidence"] {
     @shell.Cmd("moon",["check","mbtx/scripts/"+script+".mbtx"]).run()
   }
   @shell.Cmd("moon",["check","--target","wasm"],cwd="mbtx").run()
@@ -17,6 +17,7 @@ async fn main {
   @shell.Cmd("moon",["run","mbtx/scripts/validate-long-fixtures.mbtx"]).run()
   @shell.Cmd("just",["test","-p","codex-core","--test","all","-E","test(suite::mbtx)","--run-ignored","all","--locked"],env=environment).run()
   @shell.Cmd("moon",["run","mbtx/scripts/validate-long-study.mbtx"]).run()
+  @shell.Cmd("moon",["run","mbtx/scripts/validate-retries.mbtx"]).run()
   @shell.Cmd("moon",["run","mbtx/scripts/validate-observation.mbtx"]).run()
   @shell.Cmd("moon",["run","mbtx/scripts/prepare-evaluation.mbtx"]).run()
   println("Long-study offline validation completed. Linux online pilot and formal data are separate research work.")

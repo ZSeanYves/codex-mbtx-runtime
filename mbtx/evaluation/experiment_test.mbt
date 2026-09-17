@@ -31,6 +31,38 @@ test "oracle rejects a plausible wrong answer and modified inputs" {
 }
 
 ///|
+test "recovered external errors remain visible without erasing completed tasks" {
+  let task : Json = {
+    "id": "t",
+    "files": {},
+    "output": "result.json",
+    "expected": 42,
+  }
+  for (result, expected) in [("42", "success"), ("43", "task_failure")] {
+    let report = @evaluation.analyze_attempt(task, {
+      "trace": capture([]),
+      "integrity": true,
+      "snapshot": { "files": { "result.json": result.to_json() }, "errors": [] },
+      "outcome": { "termination": "exited", "exit_code": 0 },
+      "exchanges": [
+        { "status_code": 500, "transport_error": false },
+        { "status_code": 200, "transport_error": false },
+      ],
+    })
+    guard report
+      is {
+        "status": String(status),
+        "external_failures_observed": Number(1, ..),
+        "external_errors_recovered": True,
+        ..
+      } &&
+      status == expected else {
+      fail(report.stringify())
+    }
+  }
+}
+
+///|
 test "worker observation failure is a harness failure even if final artifacts match" {
   let task : Json = {
     "id": "t",

@@ -1,0 +1,51 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+
+async fn main {
+  let bundle = match @env.get_env_var("MBTX_BUNDLE") {
+    Some(path) => path
+    None => @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
+  }
+  let root = "_build/retry-validation/run-\{@env.now()}"
+  @fs.mkdir(root, recursive=true)
+  let base = @fs.read_file("mbtx/config/relay.toml").text()
+  guard base.contains("request_max_retries = 2") && base.contains("stream_max_retries = 2") else {fail("Update the explicit retry fixture template")}
+  for (name, http, stream, fault, sends, http_used, stream_used, expected) in [
+    ("http-exhausted",1,0,"500",2,1,0,"relay_error"),
+    ("stream-exhausted",0,1,"disconnect",2,0,1,"relay_error"),
+    ("disabled",0,0,"disconnect",1,0,0,"relay_error"),
+    ("http-recovered",2,2,"500-once",3,1,0,"success"),
+    ("stream-recovered",2,2,"disconnect-once",3,0,1,"success"),
+    ("rate-limited",2,2,"429",1,0,0,"relay_error"),
+  ] {
+    let config = root + "/" + name + ".toml"
+    @fs.write_file(config, base.replace(old="request_max_retries = 2", new="request_max_retries = \{http}").replace(old="stream_max_retries = 2", new="stream_max_retries = \{stream}"))
+    let destination = root + "/" + name
+    @shell.Cmd(bundle + "/mbtx-eval", ["run","--bundle",bundle,"--mode","replay","--suite","long-study","--tasks","repository-impact-standard-v1","--repeats","1","--min-interval-ms","0","--max-wall-seconds","60","--config",config,"--output",destination,"--replay-fault",fault]).run()
+    let reports = @fs.readdir(destination + "/reports")
+    assert_eq(reports.length(),1)
+    let report = @json.parse(@fs.read_file(destination + "/reports/" + reports[0] + "/report.json").text())
+    guard report is {"attempts":Array(attempts),..} else {fail("Missing attempts")}
+    assert_eq(attempts.length(),2)
+    for attempt in attempts {
+      guard attempt is {
+        "status":String(status),
+        "outcome":{"termination":String("exited"),..},
+        "upstream_requests_observed":Number(actual_sends,..),
+        "accounting":{"observed":{"http_transport_retries":Number(actual_http,..),"agent_stream_retries":Number(actual_stream,..),..},..},..
+      } && status==expected && actual_sends==sends.to_double() && actual_http==http_used.to_double() && actual_stream==stream_used.to_double() else {fail("Retry boundary failed: \{name}: \{attempt.stringify()}")}
+      if expected=="success" {
+        guard attempt is {"steps_to_success":Number(2,..),"external_failures_observed":Number(1,..),"external_errors_recovered":True,..} else {fail("Recovery was hidden or changed decision counts")}
+      } else {
+        guard attempt is {"steps_to_success":Null,..} else {fail("Exhausted retries claimed completion")}
+      }
+    }
+  }
+  println("Bounded retry validation passed: independent HTTP and stream limits, zero retries, recovered failures, and non-retried 429; both interfaces.")
+  println("Evidence: " + root)
+}

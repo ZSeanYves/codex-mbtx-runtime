@@ -185,7 +185,10 @@ The checksum uses the archive's basename, so it can be verified after transfer w
 All model requests, probes and auxiliary Responses calls use one gate. It owns
 the concurrency slot through the full response stream and records queue wait
 separately. The minimum start interval is 15 seconds, about four starts per minute.
-Automatic HTTP and stream retries are disabled. A 429 remains an external failure;
+HTTP retries and agent stream reconnects each default to two retries after the
+initial try, independently configurable from zero to five in `relay.toml`.
+Unbounded connection recovery and gateway-internal resends are disabled.
+A 429 is not retried and remains an external failure;
 later sends respect `Retry-After` in seconds or HTTP-date form, with 30 seconds
 when absent or invalid. A second evaluator using the same account on the same
 host is refused. Other computers and applications using that account remain

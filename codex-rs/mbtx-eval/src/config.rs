@@ -49,11 +49,12 @@ impl RelayConfig {
             "relay requires HTTPS; HTTP is allowed only for loopback validation"
         );
         ensure!(
-            provider.wire_api == "responses"
-                && !provider.requires_openai_auth
-                && provider.request_max_retries == 0
-                && provider.stream_max_retries == 0,
-            "evaluation requires Responses, env_key authentication and disabled request/stream retries"
+            provider.wire_api == "responses" && !provider.requires_openai_auth,
+            "evaluation requires Responses and env_key authentication"
+        );
+        ensure!(
+            provider.request_max_retries <= 5 && provider.stream_max_retries <= 5,
+            "request_max_retries and stream_max_retries must each be 0..=5 retries after the initial attempt"
         );
         ensure!(
             !config.model.is_empty() && !provider.env_key.is_empty(),
@@ -166,8 +167,14 @@ pub(crate) fn child_config(
             ("env_key", "MBTX_LOCAL_KEY".into()),
             ("requires_openai_auth", false.into()),
             ("supports_websockets", false.into()),
-            ("request_max_retries", 0.into()),
-            ("stream_max_retries", 0.into()),
+            (
+                "request_max_retries",
+                (provider.request_max_retries as i64).into(),
+            ),
+            (
+                "stream_max_retries",
+                (provider.stream_max_retries as i64).into(),
+            ),
             ("stream_idle_timeout_ms", 120_000.into()),
         ]))?,
     );
@@ -184,6 +191,8 @@ pub(crate) fn child_config(
             ("plugins", false),
             ("apps", false),
             ("memories", false),
+            // Upstream enables this by default and it bypasses stream_max_retries.
+            ("unbounded_connection_retries", false),
         ]))?,
     );
     value.insert("default_permissions".into(), "evaluation".into());
@@ -253,3 +262,7 @@ pub(crate) fn child_config(
     value.insert("otel".into(), otel.into());
     Ok(toml::to_string_pretty(&value)?)
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;

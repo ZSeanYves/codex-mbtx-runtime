@@ -136,6 +136,14 @@ evidence and delays later requests according to valid Retry-After or a 30-second
 fallback. No successful-sample replacement or latency-based sample selection
 is permitted. The frozen manifest records configuration and collection conditions.
 
+Native Codex HTTP retries and agent stream reconnects have separate finite limits
+(two retries each by default, configurable from zero to five). The evaluation
+configuration disables upstream's default unbounded connection-retry feature.
+The gateway's HTTP client performs no implicit resends, so every actual request
+is paced and recorded. A recovered network failure remains in the evidence;
+terminal task success, observed external failures and the two retry counts are
+reported separately. Normal agent decisions and tool calls retain no count cap.
+
 The independent MoonBit oracle checks outputs and authorized state changes.
 Tasks requiring process execution use host receipts from the hash-verified worker
 executable, authenticated by the local peer PID. Delivery programs execute on

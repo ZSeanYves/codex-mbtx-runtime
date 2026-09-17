@@ -58,7 +58,7 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
   let outcome = field(facts, "outcome")
   let termination = field(outcome, "termination")
   let exchanges : Array[Json] = @json.from_json(field(facts, "exchanges"))
-  let external = exchanges.any(item => {
+  let external_failures = exchanges.filter(item => {
     let status : Int? = nullable(field(item, "status_code")) catch { _ => None }
     field(item, "transport_error") == true.to_json() ||
     (
@@ -71,6 +71,10 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
       None => false
     })
   })
+  let external = !external_failures.is_empty()
+  let session_completed = field(trace, "status") == Json::string("completed") &&
+    field(outcome, "exit_code") == (0).to_json() &&
+    termination == Json::string("exited")
   let worker_records : Array[Json] = @json.from_json(
     field(field(facts, "snapshot"), "worker_events"),
   ) catch {
@@ -94,7 +98,7 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     "budget_exhausted"
   } else if termination == Json::string("harness_error") {
     "harness_error"
-  } else if external {
+  } else if external && !session_completed {
     "relay_error"
   } else if trace == Json::null() &&
     field(outcome, "exit_code") != (0).to_json() {
@@ -126,6 +130,8 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
       Json::null()
     },
     "termination_reason": termination,
+    "external_failures_observed": external_failures.length().to_json(),
+    "external_errors_recovered": (external && session_completed).to_json(),
     "oracle": oracle,
     "visible_oracle": visible_oracle,
     "submission": validation,
@@ -327,6 +333,10 @@ pub fn analyze_experiment(
       })
       .length()
       .to_json(),
+      "recovered_external_error_arms": selected
+      .filter(a => field(a, "external_errors_recovered") == true.to_json())
+      .length()
+      .to_json(),
       "infrastructure_failures": selected
       .filter(a => infrastructure(field(a, "status")))
       .length()
@@ -453,7 +463,7 @@ pub fn analyze_experiment(
   }
   {
     "schema_version": 1,
-    "analysis_version": "programmable-long-analysis-v1",
+    "analysis_version": "programmable-long-analysis-v2",
     "run_id": field(manifest, "run_id"),
     "mode": field(manifest, "mode"),
     "platform": field(manifest, "platform"),

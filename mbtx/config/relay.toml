@@ -10,5 +10,8 @@ base_url = "https://tokenadvent.com/v1"
 wire_api = "responses"
 env_key = "OPENAI_API_KEY"
 requires_openai_auth = false
-request_max_retries = 0
-stream_max_retries = 0
+# Independent retries after the first try, each constrained to 0..5.
+# HTTP request retries are initiated by Codex and traverse the same gateway.
+# The gateway does not add its own hidden retries. 429 is not retried.
+request_max_retries = 2
+stream_max_retries = 2

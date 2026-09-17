@@ -155,10 +155,54 @@ test "HTTP retries and compaction requests do not add task steps" {
         "agent_steps": Number(1, ..),
         "model_requests": Number(3, ..),
         "http_transport_retries": Number(1, ..),
+        "agent_stream_retries": Number(0, ..),
         ..
       },
       "observed": { "compaction_requests": Number(1, ..), .. },
       "requests": [_, _, { "status_code": Null, "ended_seq": Null, .. }],
+      ..
+    } else {
+    fail(report.stringify())
+  }
+}
+
+///|
+test "a sampling reconnect is distinct from a new decision or HTTP retry" {
+  let report = @evaluation.analyze_steps(
+    capture(
+      [
+        event(1, { "type": "started", "step_id": "s" }),
+        event(2, {
+          "type": "inference_linked",
+          "step_id": "s",
+          "inference_call_id": "first",
+          "purpose": "task",
+        }),
+        event(3, {
+          "type": "inference_linked",
+          "step_id": "s",
+          "inference_call_id": "retry",
+          "purpose": "task",
+        }),
+        event(4, {
+          "type": "finished",
+          "step_id": "s",
+          "outcome": "accepted",
+          "response_id": "r",
+          "reason": null,
+        }),
+      ],
+      inferences={ "first": {}, "retry": {} },
+    ),
+  )
+  guard report
+    is {
+      "metrics": {
+        "agent_steps": Number(1, ..),
+        "agent_stream_retries": Number(1, ..),
+        "http_transport_retries": Null,
+        ..
+      },
       ..
     } else {
     fail(report.stringify())

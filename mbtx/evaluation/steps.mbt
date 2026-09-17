@@ -251,6 +251,12 @@ pub fn analyze_steps(trace : Json) -> Json raise {
     }
   }
   let retries = ordered_requests.filter(request => request.attempt > 0).length()
+  // A new sampling inference within the same logical decision is a stream
+  // reconnect. HTTP transport attempts retain that inference identity.
+  let mut stream_retries = 0
+  for step in ordered_steps {
+    stream_retries += Int::max(0, step.inference_ids.length() - 1)
+  }
   let task_requests = ordered_requests
     .filter(request => request.scope.purpose == "task")
     .length()
@@ -276,6 +282,7 @@ pub fn analyze_steps(trace : Json) -> Json raise {
         http_covered && step_covered,
       ),
       "http_transport_retries": count(retries, http_covered && step_covered),
+      "agent_stream_retries": count(stream_retries, step_covered),
       "tool_calls": count(emitted, step_covered),
       "tool_executions": count(dispatched, step_covered),
       "poll_or_input_calls": count(polls, step_covered),
@@ -289,6 +296,7 @@ pub fn analyze_steps(trace : Json) -> Json raise {
       "agent_steps": accepted.to_json(),
       "model_requests": ordered_requests.length().to_json(),
       "http_transport_retries": retries.to_json(),
+      "agent_stream_retries": stream_retries.to_json(),
       "task_requests": task_requests.to_json(),
       "compaction_requests": compaction_requests.to_json(),
       "tool_calls": emitted.to_json(),

@@ -108,9 +108,24 @@ All evaluator requests use one gate, including probes and auxiliary HTTP calls.
 The permit is held until the upstream stream ends. Relay send starts are at
 least 15 seconds apart. A 429 is retained as a failed request; the next request
 waits for a valid `Retry-After`, or at least 30 seconds when it is absent or
-invalid, and still respects normal pacing. The Codex provider's automatic
-request and stream retries are disabled. The gate nevertheless observes every
-request it receives. A host-level account lock prevents two collectors on this
+invalid, and still respects normal pacing. Two independent native Codex limits
+are frozen in `mbtx/config/relay.toml`: `request_max_retries = 2` for transient
+HTTP/transport failures and `stream_max_retries = 2` for agent sampling stream
+reconnections. Each counts retries after the initial try and accepts 0..5;
+zero disables that layer. `unbounded_connection_retries` is explicitly false.
+The gateway adds no hidden retries, and 429 is not retried. Every retry traverses
+the same serialized, paced gate. Nested HTTP and stream recovery can send at most
+nine HTTP attempts per logical sampling call with the defaults; this is not a
+limit on successful task decisions, tool calls or total task requests.
+
+Native evidence counts `http_transport_retries` and `agent_stream_retries`
+separately. Failed requests remain immutable even when a later retry succeeds.
+A normally completed session with correct artifacts can be successful with
+`external_errors_recovered = true`; the report also counts recovered-error arms
+and retains every external failure. Exhausted recovery remains an external
+failure and completion steps stay null. The complete policy is stored in the
+run manifest; changing it requires a new run, not resuming old conditions.
+A host-level account lock prevents two collectors on this
 host from sharing the account concurrently; other applications or hosts remain
 outside this control.
 
