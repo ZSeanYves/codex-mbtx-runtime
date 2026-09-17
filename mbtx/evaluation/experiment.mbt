@@ -437,7 +437,8 @@ pub fn evaluate_request(request : Json) -> Json raise {
         field(request, "suite") == Json::string("pilot") {
         pilot_protocol()
       } else {
-        study_protocol(string_field(request, "suite"))
+        let suite = string_field(request,"suite")
+        if suite == "long-study" || suite == "long-pilot" { long_protocol(suite == "long-pilot") } else { study_protocol(suite) }
       }
     "steps" => analyze_steps(field(request, "trace"))
     "attempt" =>

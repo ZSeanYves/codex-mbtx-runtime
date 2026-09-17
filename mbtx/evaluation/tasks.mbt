@@ -158,8 +158,9 @@ pub fn task_oracle(task : Json, snapshot : Json) -> Json raise {
     }
   }
   let files = object_field(snapshot, "files")
+  let mutable_inputs : Array[Json] = @json.from_json(field(task,"mutable_inputs")) catch { _ => [] }
   for path, content in object_field(task, "files") {
-    if path != output && files.get(path) != Some(content) {
+    if path != output && !mutable_inputs.contains(path.to_json()) && files.get(path) != Some(content) {
       return {
         "success": false,
         "reason": "An input file was modified or removed",
@@ -170,6 +171,9 @@ pub fn task_oracle(task : Json, snapshot : Json) -> Json raise {
   let parsed = match files.get(output) {
     Some(String(content)) => @json.parse(content) catch { _ => Json::null() }
     _ => Json::null()
+  }
+  if parsed == field(task,"expected") && field(task,"expected_outputs") != Json::null() {
+    return long_oracle(task, snapshot)
   }
   {
     "success": (parsed == field(task, "expected")).to_json(),
