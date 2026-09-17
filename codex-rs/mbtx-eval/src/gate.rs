@@ -47,10 +47,8 @@ pub(crate) struct Route {
     pub token: String,
     pub replies: Option<Vec<Reply>>,
     pub active: AtomicBool,
-    pub budget_exhausted: AtomicBool,
     pub requests: AtomicUsize,
     pub otel_requests: AtomicUsize,
-    pub request_budget: usize,
     pub observation_failures: AtomicUsize,
     pub closed: Notify,
     pub otel_write: std::sync::Mutex<()>,
@@ -255,12 +253,6 @@ async fn exchange(
             ))?);
     }
     let ordinal = route.requests.fetch_add(1, Ordering::SeqCst);
-    if ordinal >= route.request_budget || native_budget_exhausted(&route.directory) {
-        route.budget_exhausted.store(true, Ordering::SeqCst);
-        return Ok(Response::builder()
-            .status(400)
-            .body(Body::from("evaluation request budget exhausted"))?);
-    }
     let body: serde_json::Value = serde_json::from_slice(&bytes)?;
     let directory = route
         .directory
@@ -484,30 +476,4 @@ async fn exchange(
         .context("response headers")?
         .extend(response_headers);
     Ok(response.body(Body::from_stream(ReceiverStream::new(receiver)))?)
-}
-
-pub(crate) fn native_budget_exhausted(directory: &std::path::Path) -> bool {
-    let mut steps = 0;
-    let mut tools = 0;
-    for entry in walkdir::WalkDir::new(directory.join("trace"))
-        .max_depth(2)
-        .into_iter()
-        .filter_map(std::result::Result::ok)
-    {
-        if entry.file_name() != "trace.jsonl" {
-            continue;
-        }
-        if let Ok(text) = std::fs::read_to_string(entry.path()) {
-            for line in text.lines() {
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
-                    match value["payload"]["observation"]["type"].as_str() {
-                        Some("started") => steps += 1,
-                        Some("tool_emitted") => tools += 1,
-                        _ => (),
-                    }
-                }
-            }
-        }
-    }
-    steps > 12 || tools > 24
 }

@@ -47,6 +47,9 @@ pub(crate) struct RunArgs {
     /// Stop between pairs after this many newly attempted pairs in this invocation.
     #[arg(long)]
     pub batch_pairs: Option<usize>,
+    /// Entire Codex attempt, including external requests and pacing; never a step cutoff.
+    #[arg(long, default_value_t = 3600)]
+    pub max_wall_seconds: u64,
     #[arg(long, default_value_t = 20260916)]
     pub seed: u64,
     #[arg(long, default_value_t = 15000)]
@@ -87,7 +90,6 @@ fn route(
     directory: PathBuf,
     arm: &str,
     replies: Option<Vec<replay::Reply>>,
-    budget: usize,
 ) -> Result<Route> {
     for child in ["http", "otel", "trace"] {
         fs::create_dir(directory.join(child))?;
@@ -98,10 +100,8 @@ fn route(
         token: uuid::Uuid::new_v4().to_string(),
         replies,
         active: AtomicBool::new(true),
-        budget_exhausted: AtomicBool::new(false),
         requests: AtomicUsize::new(0),
         otel_requests: AtomicUsize::new(0),
-        request_budget: budget,
         observation_failures: AtomicUsize::new(0),
         closed: tokio::sync::Notify::new(),
         otel_write: std::sync::Mutex::new(()),
@@ -114,6 +114,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         "pilot collection currently supports Linux and macOS only"
     );
     ensure!(args.batch_pairs != Some(0), "batch-pairs must be positive");
+    ensure!((1..=86400).contains(&args.max_wall_seconds), "max-wall-seconds must be 1..86400");
     ensure!(
         args.mode != "relay" || args.min_interval_ms >= 15000,
         "relay start interval must be at least 15000 ms"
@@ -233,6 +234,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                 && previous["config"] == serde_json::to_value(&config)?
                 && previous["mode"] == args.mode
                 && previous["min_interval_ms"] == args.min_interval_ms
+                && previous["max_wall_seconds"] == args.max_wall_seconds
                 && previous["schedule"] == json!(expected_schedule)
                 && previous["protocol"] == protocol
                 && previous["path"] == path
@@ -268,6 +270,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         let mut manifest = manifest;
         manifest["path"] = json!(path);
         manifest["utilities"] = json!(utilities);
+        manifest["max_wall_seconds"] = json!(args.max_wall_seconds);
         json_new(&args.output.join("run.json"), &manifest)?;
         write_new(
             &args.output.join("run.sha256"),
@@ -398,7 +401,7 @@ async fn collect_schedule(
                 None
             };
             let route = gate
-                .add(id.clone(), route(directory.clone(), arm, replies, 16)?)
+                .add(id.clone(), route(directory.clone(), arm, replies)?)
                 .await;
             if let Err(error) = execution.execute(task, &pair["pair_id"], &id, &route).await {
                 if !directory.join("seal.json").exists() {
@@ -430,7 +433,7 @@ async fn probe(root: &Path, config: &RelayConfig, gate: &Arc<Gate>) -> Result<bo
         let directory = root.join("probes").join(&id);
         fs::create_dir(&directory)?;
         let route = gate
-            .add(id.clone(), route(directory.clone(), "probe", None, 1)?)
+            .add(id.clone(), route(directory.clone(), "probe", None)?)
             .await;
         let response = client
             .post(format!("{}/a/{id}/v1/responses", gate.endpoint))

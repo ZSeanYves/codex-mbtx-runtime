@@ -151,6 +151,7 @@ async fn main() -> Result<()> {
                 credentials_file: None,
                 repeats: Some(repeats),
                 batch_pairs: None,
+                max_wall_seconds: manifest["max_wall_seconds"].as_u64().context("recorded wall limit")?,
                 seed: manifest["seed"].as_u64().context("seed")?,
                 min_interval_ms: 15000,
                 tasks,

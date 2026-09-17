@@ -78,6 +78,8 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     "harness_error"
   } else if outcome == Json::null() {
     "censored"
+  } else if termination == Json::string("wall_limit") {
+    "censored"
   } else if termination == Json::string("timeout") {
     "timeout"
   } else if termination == Json::string("cancelled") {
@@ -105,6 +107,13 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     "task_id": field(task, "id"),
     "arm": field(facts, "arm"),
     "status": status.to_json(),
+    "steps_to_success": if status == "success" &&
+      field(field(accounting, "coverage"), "steps") == true.to_json() {
+      field(field(accounting, "metrics"), "agent_steps")
+    } else {
+      Json::null()
+    },
+    "termination_reason": termination,
     "oracle": oracle,
     "visible_oracle": visible_oracle,
     "submission": validation,

@@ -155,16 +155,15 @@ impl Execution<'_> {
             &json!({"pid":pid,"pgid":pid,"wall_start_ms":wall_start,"clock_domain":format!("attempt-{id}-monotonic")}),
         )?;
         let mut termination = "exited";
+        let max_wall_seconds = manifest["max_wall_seconds"]
+            .as_u64()
+            .context("recorded attempt wall limit")?;
         let status = tokio::select! {
             status=child.wait()=>status?,
-            _=tokio::time::sleep(Duration::from_secs(600))=> {termination="timeout"; terminate(&mut child,pid).await?},
+            _=tokio::time::sleep(Duration::from_secs(max_wall_seconds))=> {termination="wall_limit"; terminate(&mut child,pid).await?},
             _=tokio::signal::ctrl_c()=> {termination="cancelled"; terminate(&mut child,pid).await?},
-            _=async { loop { if crate::gate::native_budget_exhausted(directory) || route.budget_exhausted.load(Ordering::SeqCst) {break;} tokio::time::sleep(Duration::from_millis(100)).await; } }=> {termination="budget_exhausted"; terminate(&mut child,pid).await?},
         };
         let elapsed = start.elapsed().as_nanos() as u64;
-        if route.budget_exhausted.load(Ordering::SeqCst) {
-            termination = "budget_exhausted";
-        }
         route.close();
         tokio::time::timeout(Duration::from_secs(15), gate.drain())
             .await
