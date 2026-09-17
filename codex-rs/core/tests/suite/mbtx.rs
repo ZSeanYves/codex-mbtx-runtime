@@ -62,6 +62,13 @@ async fn filename_reuses_compilation_but_executes_fresh_and_source_changes_inval
     assert_ne!(results[0]["artifact_path"], results[1]["artifact_path"]);
     assert_eq!(results[2]["cache"], "dependencies_reused");
     assert_eq!(results[2]["run"]["stdout"], "changed λ\n");
+    for result in &results {
+        assert_eq!(result["source_resource"]["complete"], true);
+        assert_eq!(result["artifact_resource"]["complete"], true);
+        assert!(result["artifact_resource"]["bytes"].as_u64().is_some_and(|bytes|bytes>0));
+    }
+    assert_eq!(results[0]["artifact_resource"]["sha256"], results[1]["artifact_resource"]["sha256"]);
+    assert_ne!(results[0]["artifact_resource"]["resource_id"], results[1]["artifact_resource"]["resource_id"]);
     Ok(())
 }
 
@@ -94,6 +101,7 @@ async fn configured(server: &MockServer) -> Result<TestCodex> {
         .with_extensions(Arc::new(extensions.build()))
         .with_config(move |config| {
             config.mbtx = settings;
+            config.mbtx.output_directory = Some(AbsolutePathBuf::from_absolute_path(config.codex_home.join("test-output-resources")).expect("absolute capture path"));
             config
                 .permissions
                 .shell_environment_policy

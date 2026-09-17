@@ -32,6 +32,7 @@ pub(crate) struct ProgramResult {
     pub build_reused_from: Option<String>,
     pub preparation_ms: u64,
     pub source_resource: Option<codex_tools::output_archive::OutputResource>,
+    pub artifact_resource: Option<codex_tools::output_archive::OutputResource>,
 }
 
 impl ProgramResult {
@@ -103,6 +104,7 @@ pub(crate) async fn execute(
         build_reused_from: None,
         preparation_ms: 0,
         source_resource: None,
+        artifact_resource: None,
     };
     let outcome = async {
         let preparing = Instant::now();
@@ -157,7 +159,7 @@ pub(crate) async fn execute(
         if source_text.is_empty() || source_text.len() > 65536 {
             return Err("source must contain 1..65536 UTF-8 bytes".into());
         }
-        result.source_resource = executor.archive_source(&source_text);
+        result.source_resource = executor.archive_program_resource("source","utf8",source_text.as_bytes());
         let directory = cwd
             .join(&format!(".codex-mbtx/{}", Uuid::new_v4()))
             .map_err(|e| e.to_string())?;
@@ -325,6 +327,7 @@ pub(crate) async fn execute(
         compiled
         };
         let execution_artifact = directory.join("program.wasm").map_err(|e| e.to_string())?;
+        result.artifact_resource = executor.archive_program_resource("artifact","wasm",&compiled.bytes);
         fs.write_file(&execution_artifact, compiled.bytes, WriteFileOptions { follow_symlinks: false }, sandbox).await.map_err(|e| e.to_string())?;
         state.prepared = Some(prepared);
         drop(state);

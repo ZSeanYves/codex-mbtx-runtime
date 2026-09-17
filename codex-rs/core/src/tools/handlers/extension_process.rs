@@ -39,11 +39,11 @@ use crate::tools::sandboxing::ToolRuntime;
 pub(super) struct CoreProcessExecutor(pub(super) Weak<ToolInvocation>);
 
 impl ToolProcessExecutor for CoreProcessExecutor {
-    fn archive_source(&self, source: &str) -> Option<codex_tools::output_archive::OutputResource> {
+    fn archive_program_resource(&self, phase: &'static str, stream: &'static str, bytes: &[u8]) -> Option<codex_tools::output_archive::OutputResource> {
         let invocation = self.0.upgrade()?;
         let root = invocation.step_context.turn.config.mbtx.output_directory.as_ref()?;
-        let archive = codex_tools::output_archive::OutputArchive::capture(&root.join(invocation.session.thread_id.to_string()), &invocation.call_id, "source", "utf8");
-        archive.append(source.as_bytes());
+        let archive = codex_tools::output_archive::OutputArchive::capture(&root.join(invocation.session.thread_id.to_string()), &invocation.call_id, phase, stream);
+        archive.append(bytes);
         Some(archive.finish())
     }
 

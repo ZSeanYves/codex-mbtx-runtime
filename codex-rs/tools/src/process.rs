@@ -45,8 +45,9 @@ pub struct ToolProcessOutput {
 /// Invocation-scoped host capability for permission-aware process execution.
 /// Implementations must honor cancellation, reap the child, and bound IO drain.
 pub trait ToolProcessExecutor: Send + Sync {
-    /// Snapshot the exact submitted source outside task-writable paths.
-    fn archive_source(&self, _source: &str) -> Option<crate::output_archive::OutputResource> { None }
+    /// Snapshot submitted source or executable bytes outside task-writable paths.
+    /// Phase and stream labels are supplied by the trusted extension, not paths.
+    fn archive_program_resource(&self, _phase: &'static str, _stream: &'static str, _bytes: &[u8]) -> Option<crate::output_archive::OutputResource> { None }
 
     /// Read a host-registered output from this session only. Implementations
     /// must not accept arbitrary paths or another session's resource IDs.
