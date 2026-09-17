@@ -1,0 +1,44 @@
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/json",
+}
+
+async fn main {
+  let fields = " alpha ,雪,beta,alpha".split(",").to_array()
+  let counts : Map[String, Int] = Map([])
+  for field in fields {
+    let name = field.trim().to_owned()
+    counts[name] = counts.get(name).unwrap_or(0) + 1
+  }
+  let names = counts.keys().to_array()
+  names.sort_by(fn(a, b) {
+    let left = a.iter().to_array()
+    let right = b.iter().to_array()
+    for i in 0..<Int::min(left.length(), right.length()) {
+      let order = left[i].compare(right[i])
+      if order != 0 { return order }
+    }
+    left.length().compare(right.length())
+  })
+  assert_eq(names, ["alpha", "beta", "雪"])
+  let row : Json = { "name": names[0].to_json(), "count": counts["alpha"].to_json() }
+  match @json.parse(row.stringify()) {
+    { "name": String(name), "count": Number(count, ..), .. } => {
+      assert_eq(name, "alpha")
+      assert_eq(count.to_int(), 2)
+    }
+    _ => fail("unexpected JSON shape")
+  }
+  let bad = try { ignore(@json.parse("{")); false } catch { _ => true }
+  assert_true(bad)
+  if !@fs.exists("example-data") { @fs.mkdir("example-data", recursive=true) }
+  @fs.write_file("example-data/row.json", row.stringify() + "\n")
+  assert_eq(@json.parse(@fs.read_file("example-data/row.json").text()), row)
+  let child = @shell.Cmd("sh", ["-c", "cat; printf '%s' diagnostic >&2"], stdin=@shell.Text("λ雪\n")).output(max_output_bytes=8192)
+  assert_eq(child.exit_code(), 0)
+  assert_eq(child.stdout(), "λ雪\n")
+  assert_eq(child.stderr(), "diagnostic")
+  println("reference APIs verified")
+}

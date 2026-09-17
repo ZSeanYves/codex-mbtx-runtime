@@ -11,51 +11,97 @@ async fn checked(command : @shell.Cmd) -> String {
   result.stdout().trim().to_owned()
 }
 
+async fn fingerprint(paths : Array[String], context : String) -> String {
+  let quoted : Array[String] = []
+  for path in paths { if @fs.exists(path) { quoted.push(path.to_json().stringify()) } }
+  quoted.sort()
+  let hashes = if quoted.is_empty() { "" } else { checked(@shell.Cmd("git",["hash-object","--stdin-paths"],stdin=@shell.Text(quoted.join("\n")+"\n"))) }
+  checked(@shell.Cmd("git",["hash-object","--stdin"],stdin=@shell.Text(quoted.join("\n")+"\n"+hashes+"\n"+context)))
+}
+
 async fn main {
   guard @fs.exists("codex-rs/Cargo.toml") else { fail("Run from the repository root") }
   let root = @fs.realpath(".")
-  let preparation_started = @env.now()
-  let base = root + "/_build/evaluation-bundles"
-  if !@fs.exists(base) { @fs.mkdir(base, recursive=true) }
-  let files = checked(@shell.Cmd("git", ["ls-files", "--cached", "--others", "--exclude-standard", "codex-rs", "mbtx", "MODULE.bazel", "MODULE.bazel.lock"]))
-    .split("\n").map(p => p.to_owned()).filter(p => !p.has_suffix(".md") && !p.has_suffix(".gitkeep"))
-  let paths : Array[String] = []
-  for path in files { if @fs.exists(path) { paths.push(path.to_json().stringify()) } }
-  let moon_root = @env.get_env_var("MOON_HOME").unwrap_or(@env.get_env_var("HOME").unwrap() + "/.moon")
-  // The script itself imports this exact dependency. Resolve fixture imports
-  // before hashing on a fresh host, so the next preparation has the same key.
-  if !@fs.exists(moon_root + "/cache/deps/v1/sources/moonbitlang/async/0.21.3/src/fs/moon.pkg") {
-    @shell.Cmd("moon", ["build", "--target", "wasm", "--target-dir", root + "/_build/fixture-dependencies", "mbtx/fixtures/capabilities.mbtx"]).run()
+  for name in ["CARGO_TARGET_DIR","CARGO_BUILD_TARGET"] {
+    guard @env.get_env_var(name).unwrap_or("") == "" else {
+      fail("The host bundle uses codex-rs/target; unset \{name} before preparing it")
+    }
   }
-  for folder in ["bin", "lib", "cache/deps/v1/sources", "registry/index"] {
-    @fs.walk(moon_root + "/" + folder, max_concurrency=1, (path, files) => {
-      for name in files {
-        let file = path + "/" + name
-        if (folder != "cache/deps/v1/sources" || !file.contains("/_build/")) && !file.contains("/.git/") && name != ".DS_Store" && @fs.kind(file, follow_symlink=false) == @fs.Regular { paths.push(file.to_json().stringify()) }
+  let started = @env.now()
+  let base = root + "/_build/evaluation-bundles"
+  let stamps = root + "/_build/component-builds"
+  for path in [base,stamps] { if !@fs.exists(path) { @fs.mkdir(path,recursive=true) } }
+  let files = checked(@shell.Cmd("git",["ls-files","--cached","--others","--exclude-standard","codex-rs","mbtx","MODULE.bazel","MODULE.bazel.lock"]))
+    .split("\n").map(p=>p.to_owned()).filter(p=>!p.has_suffix(".gitkeep")).to_array()
+  let moon_root = @env.get_env_var("MOON_HOME").unwrap_or(@env.get_env_var("HOME").unwrap()+"/.moon")
+  let dependency = moon_root + "/cache/deps/v1/sources/moonbitlang/async/0.21.3"
+  if !@fs.exists(dependency + "/src/fs/moon.pkg") {
+    @shell.Cmd("moon",["build","--target","wasm","--target-dir",root+"/_build/fixture-dependencies","mbtx/fixtures/capabilities.mbtx"]).run()
+  }
+  let toolchain : Array[String] = []
+  for folder in [moon_root+"/bin",moon_root+"/lib",dependency] {
+    @fs.walk(folder,max_concurrency=1,(path,names)=>{
+      for name in names {
+        let file = path+"/"+name
+        if !file.contains("/_build/") && !file.contains("/.git/") && name!=".DS_Store" && @fs.kind(file,follow_symlink=false)==@fs.Regular { toolchain.push(file) }
       }
     })
   }
-  paths.push((moon_root + "/cache/deps/.moon-cache").to_json().stringify())
-  paths.sort()
-  let tools = checked(@shell.Cmd("moon", ["version", "--all"])) + "\n" + checked(@shell.Cmd("moonrun", ["--version"])) + "\n" + checked(@shell.Cmd("rustc", ["--version"], cwd="codex-rs")) + "\n" + checked(@shell.Cmd("uname", ["-sm"]))
-  // Git hashes file bytes in one process, including uncommitted implementation.
-  // Documentation does not enter the build key. No shell interpolation occurs.
-  let hashes = checked(@shell.Cmd("git", ["hash-object", "--stdin-paths"], stdin=@shell.Text(paths.join("\n") + "\n")))
-  let fingerprint = checked(@shell.Cmd("git", ["hash-object", "--stdin"], stdin=@shell.Text(paths.join("\n") + "\n" + hashes + "\n" + tools + "\ndev-debug0-wasm-release-v1")))
-  let bundle = base + "/" + fingerprint
-  let reused = @fs.exists(bundle + "/bundle.json")
-  if reused {
-    @shell.Cmd(bundle + "/mbtx-eval", ["verify-bundle", bundle]).run()
-    println("Reused bundle; no Codex, evaluator or fixture compilation: \{bundle}")
-  } else {
-    @shell.Cmd("moon", ["build", "--target", "wasm", "--release", "cmd/evaluation-model"], cwd="mbtx").run()
-    // Prepare the approved versioned imports before any measured invocation.
-    @shell.Cmd("moon", ["build", "--target", "wasm", "--target-dir", root + "/_build/fixture-dependencies", "mbtx/fixtures/capabilities.mbtx"]).run()
-    @shell.Cmd("cargo", ["build", "--locked", "-p", "codex-cli", "--bin", "codex", "-p", "codex-mbtx-eval", "--bin", "mbtx-eval", "--bin", "mbtx-fixture-worker", "-j", "4"], cwd="codex-rs", env={"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_INCREMENTAL":"0"}).run()
-    @shell.Cmd("codex-rs/target/debug/mbtx-eval", ["bundle", "--repo", root, "--output", bundle, "--fingerprint", fingerprint]).run()
+  for name in ["async","core"] { toolchain.push(moon_root+"/registry/index/user/moonbitlang/"+name+".index") }
+  toolchain.push(moon_root+"/cache/deps/.moon-cache")
+  let build_environment : Array[String] = []
+  for name in ["RUSTFLAGS","CARGO_ENCODED_RUSTFLAGS","CARGO_BUILD_RUSTFLAGS","RUSTC_WRAPPER","RUSTC_WORKSPACE_WRAPPER","CARGO_PROFILE_DEV_OPT_LEVEL","CARGO_PROFILE_DEV_LTO","CARGO_PROFILE_DEV_CODEGEN_UNITS","CC","CFLAGS","CXX","CXXFLAGS","LDFLAGS","MACOSX_DEPLOYMENT_TARGET","SDKROOT"] {
+    build_environment.push(name+"="+@env.get_env_var(name).unwrap_or(""))
   }
-  @fs.write_file(root + "/_build/evaluation-bundle.txt", bundle + "\n")
-  let cost : Json = {"bundle":bundle.to_json(),"reused":reused.to_json(),"preparation_ms":(@env.now()-preparation_started).to_json(),"scope":"tool discovery, build or verification, and bundle assembly; excluded from attempts"}
-  @fs.write_file(base + "/preparation-\{@env.now()}.json", cost.stringify(indent=2) + "\n")
+  let cargo_home = @env.get_env_var("CARGO_HOME").unwrap_or(@env.get_env_var("HOME").unwrap()+"/.cargo")
+  let build_config = fingerprint([cargo_home+"/config",cargo_home+"/config.toml",".cargo/config",".cargo/config.toml"],build_environment.join("\n"))
+  let versions = checked(@shell.Cmd("moon",["version","--all"]))+"\n"+checked(@shell.Cmd("moonrun",["--version"]))+"\n"+checked(@shell.Cmd("rustc",["--version"],cwd="codex-rs"))+"\n"+checked(@shell.Cmd("uname",["-sm"]))+"\ndev-debug0-wasm-release-v2\n"+build_config
+  let tool_key = fingerprint(toolchain,versions)
+  let rust = files.filter(p=>p.has_prefix("codex-rs/") && !p.has_suffix(".md"))
+  let cli_key = fingerprint(rust.filter(p=>!p.has_prefix("codex-rs/mbtx-eval/")),versions)
+  let adapter_key = fingerprint(rust,versions)
+  let model_key = fingerprint(files.filter(p=>p.has_prefix("mbtx/evaluation/") || p.has_prefix("mbtx/cmd/") || p=="mbtx/moon.mod" || p=="mbtx/moon.lock"),tool_key)
+  let reference_key = fingerprint(files.filter(p=>p.has_prefix("mbtx/reference/")),tool_key)
+  let key = fingerprint(["mbtx/scripts/prepare-evaluation.mbtx"],cli_key+adapter_key+model_key+reference_key+tool_key)
+  let bundle = base+"/"+key
+  let costs : Array[Json] = []
+  if @fs.exists(bundle+"/bundle.json") {
+    @shell.Cmd(bundle+"/mbtx-eval",["verify-bundle",bundle]).run()
+    println("Reused bundle without starting compilers: \{bundle}")
+  } else {
+    for name, component_key in {"codex":cli_key,"adapter":adapter_key,"analysis":model_key,"reference":reference_key} {
+      let stamp = stamps+"/"+name+".txt"
+      let product = match name {
+        "codex"=>"codex-rs/target/debug/codex"
+        "adapter"=>"codex-rs/target/debug/mbtx-eval"
+        "analysis"=>"mbtx/_build/wasm/release/build/cmd/evaluation-model/evaluation-model.wasm"
+        _=>"_build/reference-validation/build/wasm/release/build/single/single.wasm"
+      }
+      let products = if name=="adapter" { [product,"codex-rs/target/debug/mbtx-fixture-worker"] } else { [product] }
+      let reused = if @fs.exists(stamp) {
+        let receipt = component_key+"\n"+fingerprint(products,"built products")
+        @fs.read_file(stamp).text().trim()==receipt[:] && @fs.exists(product) && (name!="adapter" || @fs.exists("codex-rs/target/debug/mbtx-fixture-worker"))
+      } else { false }
+      let component_start = @env.now()
+      if !reused {
+        match name {
+          "codex" | "adapter" => {
+            let args = ["build","--locked","-j","4"]
+            if name=="codex" { args.append(["-p","codex-cli","--bin","codex"]) }
+            else { args.append(["-p","codex-mbtx-eval","--bin","mbtx-eval","--bin","mbtx-fixture-worker"]) }
+            @shell.Cmd("cargo",args,cwd="codex-rs",env={"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_INCREMENTAL":"0"}).run()
+          }
+          "analysis" => @shell.Cmd("moon",["build","--target","wasm","--release","cmd/evaluation-model"],cwd="mbtx").run()
+          _ => @shell.Cmd("moon",["run","mbtx/scripts/validate-reference.mbtx"]).run()
+        }
+        @fs.write_file(stamp,component_key+"\n"+fingerprint(products,"built products")+"\n")
+      }
+      costs.push({"component":name.to_json(),"fingerprint":component_key.to_json(),"reused":reused.to_json(),"elapsed_ms":(@env.now()-component_start).to_json()})
+    }
+    @shell.Cmd("codex-rs/target/debug/mbtx-eval",["bundle","--repo",root,"--output",bundle,"--fingerprint",key]).run()
+  }
+  @fs.write_file(root+"/_build/evaluation-bundle.txt",bundle+"\n")
+  let cost : Json = {"bundle":bundle.to_json(),"preparation_ms":(@env.now()-started).to_json(),"components":costs.to_json(),"scope":"fixed component preparation; excluded from attempts"}
+  @fs.write_file(base+"/preparation-\{@env.now()}.json",cost.stringify(indent=2)+"\n")
   println("Bundle: \{bundle}")
 }

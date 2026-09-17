@@ -21,7 +21,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ResourceTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: "read_resource".into(),
-            description: "Read a page of a registered read-only resource. References: reference:moonbit (verified language and IO APIs), reference:shell (portable shell), reference:tools (installed rg, jq and git). Output resource IDs are returned by execution tools. offset and next_offset are UTF-8 byte offsets; follow next_offset until eof. This tool cannot read arbitrary paths or other sessions. No compilation or execution occurs.".into(),
+            description: "Read a page of a registered read-only resource. References: reference:moonbit (verified language and IO APIs), reference:shell (portable shell), reference:tools (installed rg, jq and git), reference:examples (runnable general API examples). Output resource IDs are returned by execution tools. offset and next_offset are UTF-8 byte offsets; follow next_offset until eof. This tool cannot read arbitrary paths or other sessions. No compilation or execution occurs.".into(),
             strict: false,
             parameters: JsonSchema::object([
                 ("resource_id".into(), JsonSchema::string(None)),
@@ -44,7 +44,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ResourceTool {
             let max_bytes = requested.min(capacity);
             let result = if let Some(name) = input.resource_id.strip_prefix("reference:") {
                 let file = match name {
-                    "moonbit" => "moonbit.md", "shell" => "shell.md", "tools" => "tools.md",
+                    "moonbit" => "moonbit.md", "shell" => "shell.md", "tools" => "tools.md", "examples" => "examples.mbtx",
                     _ => return Err(FunctionCallError::RespondToModel("Unknown registered reference".into())),
                 };
                 let root = self.0.reference_directory.as_ref().ok_or_else(|| FunctionCallError::RespondToModel("No reference bundle configured".into()))?;
