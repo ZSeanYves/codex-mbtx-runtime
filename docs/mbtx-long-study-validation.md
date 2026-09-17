@@ -27,6 +27,12 @@ UTF-8 paging, resource isolation, failed writes, changed/removed cache inputs,
 and interrupted capture are tested. Unobserved OS descendant totals and
 ambiguous repair intent remain null/unknown.
 
+The final scoped `just fix` completed for the changed Rust packages. The
+intentional asynchronous compilation lock has a narrowly documented lint
+expectation: cache preparation and MoonBit builds stay serialized; program
+execution releases the lock. Tests precede the final lint/format passes, as
+required by the repository's contributor instructions.
+
 ## Evidence identifiers
 
 Local evidence remains in ignored `_build/` directories; it is not a collected
