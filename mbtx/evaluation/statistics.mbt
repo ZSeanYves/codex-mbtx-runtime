@@ -111,7 +111,11 @@ fn study_estimate(pairs : Array[Json]) -> Json raise {
   for pair in comparable {
     observed_inputs[field(pair, "task_id").stringify()] = true
   }
-  let enough = observed_inputs.length() >= 2
+  let enough = groups.values().all(samples=>{
+    let inputs : Map[String,Bool] = Map([])
+    for sample in samples { inputs[field(sample,"task_id").stringify()]=true }
+    inputs.length()>=2
+  })
   {
     "pairs": comparable.length().to_json(),
     "observed_input_variants": observed_inputs.length().to_json(),
@@ -128,7 +132,7 @@ fn study_estimate(pairs : Array[Json]) -> Json raise {
     "interval_reason": if enough {
       "Conditional on successful pairs and observed benchmark coverage; no universal generalization"
     } else {
-      "At least two distinct input variants required; repeated sampling of one input is insufficient"
+      "At least two distinct input cases are required in every observed category/complexity stratum; repeated sampling of one case is insufficient"
     },
   }
 }

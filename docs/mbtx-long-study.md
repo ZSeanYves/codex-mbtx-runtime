@@ -4,6 +4,9 @@ Protocol: **`programmable-long-study-v1`**. This document is the current collect
 and interpretation contract. Older pilot and expanded-study evidence remains
 unchanged and must not be pooled with this protocol.
 
+The [implementation validation record](mbtx-long-study-validation.md) separates
+verified local behavior from remaining platform and online research acceptance.
+
 ## Research question
 
 Under the same goals, inputs, model and permissions, does a programmable MoonBit
@@ -27,18 +30,18 @@ prompt, edits a model call or discloses the private oracle to the model.
 
 ## Prespecified population
 
-| Cohort | Category | Required linked work |
-|---|---|---|
-| Workflow | Repository impact | Change classification, dependency closure, exclusions and validation evidence |
-| Workflow | Data reconciliation | CSV and JSONL normalization, duplicate/version resolution, currency conversion, rejected records and totals |
-| Workflow | Incident investigation | Cross-file request correlation, retry deduplication, configuration evidence and incident chains |
-| Workflow | Configuration migration | Inherited configuration resolution, migration, quarantine and preservation of unrelated values |
-| Workflow | Dependent jobs | Actual worker execution, dependency order, controlled recovery, disabled branches and state summary |
-| Workflow | Incremental recovery | Checkpoint validation, generation selection, stale-state cleanup and execution of missing work only |
-| Workflow | Output forensics | Separate worker streams, anomaly context, Unicode, cross-file evidence and final tail checks |
-| Workflow | Release verification | Candidate version/content validation, hash checking, repair, stale-file removal and manifest generation |
-| Program delivery | Reusable data program | A saved program that also passes independently prepared new inputs |
-| Program delivery | Reusable recovery program | A saved coordinator that correctly recovers independently prepared states |
+| Cohort           | Category                  | Required linked work                                                                                        |
+| ---------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Workflow         | Repository impact         | Change classification, dependency closure, exclusions and validation evidence                               |
+| Workflow         | Data reconciliation       | CSV and JSONL normalization, duplicate/version resolution, currency conversion, rejected records and totals |
+| Workflow         | Incident investigation    | Cross-file request correlation, retry deduplication, configuration evidence and incident chains             |
+| Workflow         | Configuration migration   | Inherited configuration resolution, migration, quarantine and preservation of unrelated values              |
+| Workflow         | Dependent jobs            | Actual worker execution, dependency order, controlled recovery, disabled branches and state summary         |
+| Workflow         | Incremental recovery      | Checkpoint validation, generation selection, stale-state cleanup and execution of missing work only         |
+| Workflow         | Output forensics          | Separate worker streams, anomaly context, Unicode, cross-file evidence and final tail checks                |
+| Workflow         | Release verification      | Candidate version/content validation, hash checking, repair, stale-file removal and manifest generation     |
+| Program delivery | Reusable data program     | A saved program that also passes independently prepared new inputs                                          |
+| Program delivery | Reusable recovery program | A saved coordinator that correctly recovers independently prepared states                                   |
 
 Each category has two complexity levels, two input variants and two repetitions:
 eight pairs per category, **64 workflow pairs and 16 program-delivery pairs**.
@@ -63,6 +66,8 @@ baseline, with independently writable copies, HOME and sessions. Private
 expected outputs and hidden cases are outside the sandbox's readable boundary.
 Controlled-worker receipts verify actual execution using the peer process and
 executable hash; artifact text alone cannot substitute for required execution.
+The job oracle also checks observed dependency completion before successful
+dependent execution, required retryable failures, and prohibited disabled jobs.
 
 ## Frozen treatment and guidance
 
@@ -174,7 +179,8 @@ requires both successes, equal starting baselines and complete step evidence.
 Workflow and program-delivery cohorts are analyzed separately. Absolute paired
 differences and MBTX/Shell step ratios use a fixed-seed, 2,000-draw percentile
 bootstrap with category/complexity strata and nested input/repetition sampling.
-An interval requires at least two distinct inputs. Pilot estimates are
+An interval requires at least two distinct inputs in every observed category
+and complexity stratum. Pilot estimates are
 descriptive. Differential failure can select the successful subset; intervals
 do not establish an unconditional advantage or generalize to all tasks.
 
