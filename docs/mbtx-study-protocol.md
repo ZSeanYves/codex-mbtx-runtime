@@ -7,6 +7,9 @@ batch commands, or treat end-to-end latency as pure runtime speed.
 
 The [implementation validation record](mbtx-study-validation.md) separates local
 offline checks from pending Linux online research acceptance.
+The [first v2 Linux batch review](mbtx-study-batch-1789622244695.md) reports 24
+started pairs, compilation/repair costs, completion limits and external failures;
+it is a partial baseline, not a full-study acceptance report.
 
 ## Treatments and acceptance
 

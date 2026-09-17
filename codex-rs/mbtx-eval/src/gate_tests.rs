@@ -15,6 +15,21 @@ fn cooldown_uses_seconds_dates_and_invalid_fallback() {
 
 #[tokio::test]
 async fn cancellation_before_headers_is_recorded_before_drain_and_seal() -> Result<()> {
+    preheader_cancellation(WaitingClient::Connected).await
+}
+
+#[tokio::test]
+async fn client_disconnect_before_headers_preserves_the_exchange_until_cancellation() -> Result<()>
+{
+    preheader_cancellation(WaitingClient::Disconnected).await
+}
+
+enum WaitingClient {
+    Connected,
+    Disconnected,
+}
+
+async fn preheader_cancellation(client: WaitingClient) -> Result<()> {
     let received = Arc::new(Notify::new());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
@@ -67,6 +82,22 @@ async fn cancellation_before_headers_is_recorded_before_drain_and_seal() -> Resu
         .json(&json!({"input":[]}));
     let response = tokio::spawn(async move { request.send().await });
     tokio::time::timeout(Duration::from_secs(5), received.notified()).await?;
+    let response = match client {
+        WaitingClient::Connected => Some(response),
+        WaitingClient::Disconnected => {
+            response.abort();
+            assert!(response.await.unwrap_err().is_cancelled());
+            // The upstream has accepted the request. A downstream disconnect
+            // must not silently release its slot or abandon the evidence.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), gate.drain())
+                    .await
+                    .is_err(),
+                "client disconnect abandoned an in-flight upstream exchange"
+            );
+            None
+        }
+    };
     route.close();
     tokio::time::timeout(Duration::from_secs(5), gate.drain()).await?;
     let result = crate::evidence::read_json(&temp.path().join("http/request-0000/result.json"))?;
@@ -84,7 +115,9 @@ async fn cancellation_before_headers_is_recorded_before_drain_and_seal() -> Resu
     assert_eq!(route.observation_failures.load(Ordering::SeqCst), 0);
     assert!(!temp.path().join("http/request-0000/headers.json").exists());
     crate::evidence::seal(temp.path())?;
-    assert_eq!(response.await??.status(), StatusCode::REQUEST_TIMEOUT);
+    if let Some(response) = response {
+        assert_eq!(response.await??.status(), StatusCode::REQUEST_TIMEOUT);
+    }
     gate.stop().await;
     assert!(crate::evidence::verify(temp.path())?);
     server.abort();

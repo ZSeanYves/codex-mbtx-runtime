@@ -150,25 +150,36 @@ async fn handle(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Response {
-    match exchange(Arc::clone(&gate), id.clone(), path, headers, bytes).await {
-        Ok(response) => response,
-        Err(error) => {
-            if let Some(route) = gate.routes.read().await.get(&id)
-                && route.active.load(Ordering::SeqCst)
-            {
-                route.observation_failures.fetch_add(1, Ordering::SeqCst);
-                let _ = json_new(
-                    &route
-                        .directory
-                        .join(format!("collector-error-{}.json", uuid::Uuid::new_v4())),
-                    &json!({"error":error.to_string(),"wall_time_ms":now_ms()}),
-                );
+    // Hyper drops the handler when Codex disconnects before response headers.
+    // The exchange must retain its upstream slot and observations until it
+    // finishes or the owning attempt closes, even if there is no client left.
+    tokio::spawn(async move {
+        match exchange(Arc::clone(&gate), id.clone(), path, headers, bytes).await {
+            Ok(response) => response,
+            Err(error) => {
+                if let Some(route) = gate.routes.read().await.get(&id)
+                    && route.active.load(Ordering::SeqCst)
+                {
+                    route.observation_failures.fetch_add(1, Ordering::SeqCst);
+                    let _ = json_new(
+                        &route
+                            .directory
+                            .join(format!("collector-error-{}.json", uuid::Uuid::new_v4())),
+                        &json!({"error":error.to_string(),"wall_time_ms":now_ms()}),
+                    );
+                }
+                let mut response = Response::new(Body::from(format!("collector error: {error:#}")));
+                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                response
             }
-            let mut response = Response::new(Body::from(format!("collector error: {error:#}")));
-            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            response
         }
-    }
+    })
+    .await
+    .unwrap_or_else(|error| {
+        let mut response = Response::new(Body::from(format!("collector task failed: {error}")));
+        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        response
+    })
 }
 
 async fn exchange(
