@@ -95,40 +95,36 @@ fn text_process_case(index : Int, v : Int) -> StudyCase {
         )
       }
       if index == 3 {
-        study_case(
+        let case = study_case(
           "For every integer in input.json, invoke ./fixture-worker square N and check the child exit status. Collect its JSON output preserving input order. The worker accepts signed decimal integers; batching the orchestration is allowed.",
           "[{value:integer,square:integer}]",
           values.to_json(),
           results.to_json(),
           "[]",
         )
-        |> fn(c) {
-          {
-            ..c,
-            reference: (
-              #|jq -r '.[]' input.json | while IFS= read -r value; do ./fixture-worker square "$value" || exit; done > children.jsonl
-              #|jq -s '.' children.jsonl > result.json
-              #|
-            ),
-          }
+        {
+          ..case,
+          reference: (
+            #|jq -r '.[]' input.json | while IFS= read -r value; do ./fixture-worker square "$value" || exit; done > children.jsonl
+            #|jq -s '.' children.jsonl > result.json
+            #|
+          ),
         }
       } else {
-        study_case(
+        let case = study_case(
           "Invoke ./fixture-worker checked-square N for each integer in input.json in order. Multiples of five return exit 7 and must produce {value,status:\"rejected\",exit_code:7}; other values exit zero with {value,square}, which must produce {value,status:\"ok\",square}. Continue after expected rejections, but propagate any unexpected failure.",
           "[{value:integer,status:string,square?:integer,exit_code?:integer}]",
           values.to_json(),
           results.to_json(),
           "[]",
         )
-        |> fn(c) {
-          {
-            ..c,
-            reference: (
-              #|jq -r '.[]' input.json | while IFS= read -r value; do if ./fixture-worker checked-square "$value" > child.json; then jq '.+{status:"ok"}' child.json; else code=$?; test "$code" = 7 || exit "$code"; jq -n --argjson v "$value" '{value:$v,status:"rejected",exit_code:7}'; fi; done > children.jsonl
-              #|jq -s '.' children.jsonl > result.json
-              #|
-            ),
-          }
+        {
+          ..case,
+          reference: (
+            #|jq -r '.[]' input.json | while IFS= read -r value; do if ./fixture-worker checked-square "$value" > child.json; then jq '.+{status:"ok"}' child.json; else code=$?; test "$code" = 7 || exit "$code"; jq -n --argjson v "$value" '{value:$v,status:"rejected",exit_code:7}'; fi; done > children.jsonl
+            #|jq -s '.' children.jsonl > result.json
+            #|
+          ),
         }
       }
     }
