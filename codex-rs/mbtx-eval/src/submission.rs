@@ -91,7 +91,7 @@ impl Validator<'_> {
             Ok(meta) => meta,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(
-                    json!({"status":"missing_source","source":null,"build":null,"cases":[]}),
+                    json!({"status":"missing_source","expected_source":name,"source":null,"build":null,"cases":[]}),
                 );
             }
             Err(error) => return Err(error.into()),

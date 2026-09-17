@@ -305,7 +305,21 @@ async fn exchange(
         Some(tokio::select! {
             value=gate.client.post(format!("{}/{}",gate.upstream.trim_end_matches('/'),path))
                 .headers(forwarded_headers).bearer_auth(&gate.key).body(bytes).send()=>value,
-            _=route.closed.notified()=>anyhow::bail!("attempt cancelled before headers"),
+            _=route.closed.notified()=>{
+                // Closing an attempt is a local terminal event, not a relay
+                // error. Persist it before releasing the serialization permit
+                // so drain/seal cannot lose a request waiting for headers.
+                let end_ns = gate.epoch.elapsed().as_nanos() as u64;
+                if let Err(error) = json_new(
+                    &directory.join("result.json"),
+                    &json!({"status_code":null,"transport_error":null,"complete":false,"cancelled":true,"phase":"awaiting_headers","send_ns":send_ns,"end_ns":end_ns,"first_byte_ns":null,"response_bytes":0,"clock_domain":gate.clock_domain}),
+                ) {
+                    route.observation_failures.fetch_add(1, Ordering::SeqCst);
+                    return Err(error);
+                }
+                return Ok(Response::builder().status(StatusCode::REQUEST_TIMEOUT)
+                    .body(Body::from("evaluation attempt cancelled before response headers"))?);
+            },
         })
     } else {
         None

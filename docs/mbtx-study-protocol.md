@@ -16,6 +16,16 @@ input and two withheld inputs without further model assistance. The evaluator
 compares outputs and input preservation against independent frozen oracles.
 Writing a correct literal answer to the visible result file is insufficient.
 
+The current program-delivery protocol is `programmable-steps-programs-v2`.
+Each arm receives an explicit instruction identifying its required source file
+and language. The shared task goal, inputs and oracles remain identical. These
+arm instructions are frozen in `run.json` and retained in the actual model
+requests. Earlier v1 instructions presented both submission alternatives to both
+arms, which allowed a consistent wrong-file interpretation in an interrupted
+online run. See the [evidence diagnosis](mbtx-study-diagnosis-2026-09-17.md).
+Do not pool v1 and v2 samples or resume a v1 run with the new bundle. Existing
+v1 outcomes remain unchanged; offline replay cannot prove live-model compliance.
+
 Both interfaces retain the same common editing tools and system utilities.
 Editing program source through `apply_patch` is legitimate in both conditions.
 An MBTX program may call native utilities, including Shell; source evidence and
@@ -150,7 +160,12 @@ moon run mbtx/scripts/diagnose-study.mbtx _build/study-validation/run-TIMESTAMP
 ```
 
 The script writes a diagnostic text file beside the run and includes native
-tool output, MBTX build/run details and submission stderr when available. Linux
+tool output, MBTX build/run details, submission stderr, and per-request queue,
+response-header and terminal timings when available. Missing timing stays null.
+An attempt timeout is an overall Codex deadline, including model requests and
+local pacing. It is not a Shell or MBTX process timeout. Cancellation before
+response headers records a local cancelled request with unknown upstream status;
+it is not automatically classified as an external error. Linux
 `bwrap: execvp .../codex: No such file or directory` is a sandbox bootstrap
 failure before task execution, not evidence of a Shell/MBTX capability difference.
 Keep failed evidence; after changing the bundle or permission profile, validate

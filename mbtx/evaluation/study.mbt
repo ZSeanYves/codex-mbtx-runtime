@@ -41,7 +41,7 @@ pub fn study_protocol(suite : String) -> Json raise {
     for variant in 0..<4 {
       let instance = scenario_case(index, variant)
       let submission = if suite == "programs" {
-        " Deliver a self-contained reusable program: solution.sh for the Shell interface or solution.mbtx for MBTX. It must read the current working directory's inputs and write result.json without arguments. The evaluator will run ONLY this saved source (no auxiliary authored files) on fresh copies of this input and two unseen inputs following the same specification. No model assistance is available during validation. For Shell use POSIX sh. For MBTX use versioned single-file imports and the wasm target. Do not hardcode this instance's answer. Common editing tools may create or repair program source. Verify the visible result too."
+        " Deliver a self-contained reusable program in the assigned source file specified in your instructions. It must read the current working directory's inputs and write result.json without arguments. The evaluator will run ONLY this saved source (no auxiliary authored files) on fresh copies of this input and two unseen inputs following the same specification. No model assistance is available during validation. Do not hardcode this instance's answer. Common editing tools may create or repair program source. Verify the visible result too."
       } else {
         " Complete the workflow and verify result.json. Complete scripts, programs and common editing tools are allowed."
       }
@@ -69,9 +69,10 @@ pub fn study_protocol(suite : String) -> Json raise {
     }
   }
   let base = object_field(pilot_protocol(), "budgets")
+  let version = if suite == "programs" { "v2" } else { "v1" }
   {
     "schema_version": 1,
-    "protocol_id": ("programmable-steps-" + suite + "-v1").to_json(),
+    "protocol_id": ("programmable-steps-" + suite + "-" + version).to_json(),
     "population": "24 scenarios, four input variants, nested repetitions; configured interfaces",
     "suite": suite.to_json(),
     "arms": ["shell_tool", "mbtx_program"],
@@ -80,6 +81,16 @@ pub fn study_protocol(suite : String) -> Json raise {
     "budgets": base.to_json(),
     "pacing": field(pilot_protocol(), "pacing"),
     "instructions": field(pilot_protocol(), "instructions"),
+    // The task and acceptance rules are shared; the required source language
+    // and filename follow the assigned interface, never a model choice.
+    "arm_instructions": if suite == "programs" {
+      {
+        "shell_tool": "This attempt uses the Shell interface. Save your complete reusable POSIX sh program as solution.sh in the workspace root. This exact file is the required submission. Execute it on the visible inputs and verify result.json before finishing. Temporary tool calls do not replace the saved submission.",
+        "mbtx_program": "This attempt uses the MBTX interface. Save your complete reusable MoonBit program as solution.mbtx in the workspace root, with versioned single-file imports for the wasm target. This exact file is the required submission. Execute it on the visible inputs and verify result.json before finishing. Temporary mbtx tool programs do not replace the saved submission.",
+      }
+    } else {
+      Json::null()
+    },
     "observation": field(pilot_protocol(), "observation"),
     "tasks": tasks.to_json(),
     "validation": {

@@ -14,6 +14,84 @@ fn cooldown_uses_seconds_dates_and_invalid_fallback() {
 }
 
 #[tokio::test]
+async fn cancellation_before_headers_is_recorded_before_drain_and_seal() -> Result<()> {
+    let received = Arc::new(Notify::new());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let upstream = Router::new().route(
+        "/responses",
+        post({
+            let received = Arc::clone(&received);
+            move || {
+                let received = Arc::clone(&received);
+                async move {
+                    received.notify_one();
+                    std::future::pending::<Response>().await
+                }
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+    let gate = Gate::start(
+        format!("http://{address}"),
+        "test-key".into(),
+        Duration::ZERO,
+    )
+    .await?;
+    let temp = tempfile::tempdir()?;
+    std::fs::create_dir(temp.path().join("http"))?;
+    let route = gate
+        .add(
+            "cancel".into(),
+            Route {
+                directory: temp.path().to_owned(),
+                arm: "probe".into(),
+                token: "local".into(),
+                replies: None,
+                active: AtomicBool::new(true),
+                budget_exhausted: AtomicBool::new(false),
+                requests: AtomicUsize::new(0),
+                otel_requests: AtomicUsize::new(0),
+                request_budget: 1,
+                observation_failures: AtomicUsize::new(0),
+                closed: Notify::new(),
+                otel_write: std::sync::Mutex::new(()),
+            },
+        )
+        .await;
+    let request = reqwest::Client::builder()
+        .no_proxy()
+        .build()?
+        .post(format!("{}/a/cancel/v1/responses", gate.endpoint))
+        .bearer_auth("local")
+        .json(&json!({"input":[]}));
+    let response = tokio::spawn(async move { request.send().await });
+    tokio::time::timeout(Duration::from_secs(5), received.notified()).await?;
+    route.close();
+    tokio::time::timeout(Duration::from_secs(5), gate.drain()).await?;
+    let result = crate::evidence::read_json(&temp.path().join("http/request-0000/result.json"))?;
+    let send = result["send_ns"].as_u64().context("send boundary")?;
+    let end = result["end_ns"].as_u64().context("cancel boundary")?;
+    assert!(end >= send);
+    assert_eq!(
+        result,
+        json!({
+            "status_code":null,"transport_error":null,"complete":false,"cancelled":true,
+            "phase":"awaiting_headers","send_ns":send,"end_ns":end,
+            "first_byte_ns":null,"response_bytes":0,"clock_domain":gate.clock_domain,
+        })
+    );
+    assert_eq!(route.observation_failures.load(Ordering::SeqCst), 0);
+    assert!(!temp.path().join("http/request-0000/headers.json").exists());
+    crate::evidence::seal(temp.path())?;
+    assert_eq!(response.await??.status(), StatusCode::REQUEST_TIMEOUT);
+    gate.stop().await;
+    assert!(crate::evidence::verify(temp.path())?);
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
 async fn serializes_entire_stream_and_records_wire_failures_without_key() -> Result<()> {
     let active = Arc::new(AtomicUsize::new(0));
     let maximum = Arc::new(AtomicUsize::new(0));

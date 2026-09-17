@@ -26,6 +26,25 @@ async fn main {
     if files.contains("seal.json") {seals[path+"/seal.json"]=@fs.read_file(path+"/seal.json").text()}
   })
   assert_eq(seals.length(),2)
+  // Validate the actual model-visible request, not just the protocol template.
+  // Fixed replay cannot prove that a live model follows these instructions.
+  @fs.walk(root+"/attempts",max_concurrency=1,(path,files)=> {
+    if files.contains("assignment.json") {
+      guard @json.parse(@fs.read_file(path+"/assignment.json").text()) is {"arm":String(arm),..} else {fail("missing assignment")}
+      let expected=if arm=="mbtx_program" {"solution.mbtx"} else {"solution.sh"}
+      let other=if arm=="mbtx_program" {"solution.sh"} else {"solution.mbtx"}
+      guard @json.parse(@fs.read_file(path+"/http/request-0000/request.json").text()) is {"input":Array(input),..} else {fail("missing actual request")}
+      let instructions : Array[String] = []
+      for item in input {
+        if item is {"role":String(role),"content":Array(parts),..} && (role=="user" || role=="developer") {
+          for part in parts {if part is {"text":String(text),..} {instructions.push(text)}}
+        }
+      }
+      let visible=instructions.join("\n")
+      assert_true(visible.contains(expected) && visible.contains("This exact file is the required submission."))
+      assert_false(visible.contains(other))
+    }
+  })
   @fs.walk(root+"/reports",max_concurrency=1,(path,files)=> {
     if files.contains("report.json") {
       let report=@json.parse(@fs.read_file(path+"/report.json").text())

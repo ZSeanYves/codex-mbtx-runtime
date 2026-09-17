@@ -47,8 +47,37 @@ async fn main {
       guard field(attempt,"attempt_id") is String(id) && id.length()>0 && id.iter().all(c=>c.is_ascii_digit() || (c>='a' && c<='f') || c=='-') else {fail("Invalid evidence attempt id")}
       let directory=root+"/attempts/"+id
       lines.push("\nArm: "+arm+"; evidence: "+directory)
-      for key in ["status","task_id","workspace","oracle","tool_outcomes","outcome","evidence"] {
+      for key in ["status","task_id","workspace","oracle","visible_oracle","submission","tool_outcomes","outcome","evidence"] {
         lines.push(key+": "+excerpt(field(attempt,key).stringify(indent=2)))
+      }
+      // Same-clock intervals only. Omit protocol headers and message bodies;
+      // a missing request terminal is not evidence of zero request duration.
+      if field(attempt,"exchanges") is Array(exchanges) {
+        for exchange in exchanges {
+          let headers=field(exchange,"headers")
+          let started=field(exchange,"started")
+          let sent=if field(headers,"send_ns")==Json::null() {field(exchange,"send_ns")} else {field(headers,"send_ns")}
+          let duration : Json=match (sent,field(exchange,"end_ns")) {
+            (Number(a,..),Number(b,..)) if b>=a => ((b-a)/1000000000.0).to_json()
+            _=>Json::null()
+          }
+          let wait : Json=match (sent,field(headers,"headers_ns")) {
+            (Number(a,..),Number(b,..)) if b>=a => ((b-a)/1000000000.0).to_json()
+            _=>Json::null()
+          }
+          lines.push("HTTP exchange: "+{
+            "evidence":field(exchange,"evidence"),
+            "clock_domain":field(started,"clock_domain"),
+            "status_code":field(exchange,"status_code"),
+            "complete":field(exchange,"complete"),
+            "cancelled":field(exchange,"cancelled"),
+            "phase":field(exchange,"phase"),
+            "queue_wait_ns":field(started,"queue_wait_ns"),
+            "headers_wait_seconds":wait,
+            "send_to_terminal_seconds":duration,
+            "sse_terminal":field(exchange,"sse_terminal"),
+          }.to_json().stringify())
+        }
       }
       if @fs.exists(directory+"/codex.jsonl") {
         let events=@fs.read_file(directory+"/codex.jsonl").text()

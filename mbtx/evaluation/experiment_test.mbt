@@ -176,6 +176,39 @@ test "native starts and upstream sends remain distinct when no headers arrive" {
 }
 
 ///|
+test "local cancellation before response headers preserves unknown external status" {
+  for termination in ["timeout", "cancelled"] {
+    let exchange : Json = {
+      "status_code": Json::null(),
+      "transport_error": Json::null(),
+      "complete": false,
+      "cancelled": true,
+      "phase": "awaiting_headers",
+      "send_ns": 17,
+      "end_ns": 101,
+      "first_byte_ns": Json::null(),
+    }
+    let report = @evaluation.analyze_attempt(Json::null(), {
+      "trace": Json::null(),
+      "exchanges": [exchange],
+      "outcome": { "termination": termination.to_json(), "exit_code": 1 },
+      "integrity": true,
+    })
+    guard report
+      is {
+        "status": String(actual),
+        "upstream_requests_observed": Number(1, ..),
+        "exchanges": [retained],
+        ..
+      } else {
+      fail(report.stringify())
+    }
+    assert_eq(actual, termination)
+    assert_eq(retained, exchange)
+  }
+}
+
+///|
 test "a successful arm with missing step coverage is retained outside paired analysis" {
   let manifest : Json = {
     "run_id": "r",

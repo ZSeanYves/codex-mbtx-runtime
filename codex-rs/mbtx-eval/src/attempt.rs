@@ -85,6 +85,17 @@ impl Execution<'_> {
         let instructions = manifest["protocol"]["instructions"]
             .as_str()
             .context("instructions")?;
+        // Older frozen protocols have only the common instructions. Never
+        // silently give a recorded run a newer submission contract on resume.
+        let instructions = match manifest["protocol"].get("arm_instructions") {
+            Some(arms) if !arms.is_null() => format!(
+                "{instructions}\n\n{}",
+                arms[&route.arm]
+                    .as_str()
+                    .context("assigned arm instructions")?
+            ),
+            _ => instructions.to_owned(),
+        };
         let toml = child_config(
             config,
             bundle,
@@ -93,7 +104,7 @@ impl Execution<'_> {
                 arm: &route.arm,
                 endpoint: &endpoint,
                 attempt_id: id,
-                instructions,
+                instructions: &instructions,
                 work: &work,
             },
         )?;
