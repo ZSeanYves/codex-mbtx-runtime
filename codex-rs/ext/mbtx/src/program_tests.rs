@@ -14,6 +14,7 @@ fn escaped_output_fits_the_response_budget_without_fabricating_observations() {
         artifact_path: None,
         build: None,
         error: None,
+        cache: "cold", build_reused_from: None, preparation_ms: 0,
         run: Some(ToolProcessOutput {
             status: ToolProcessStatus::Cancelled,
             exit_code: None,
@@ -65,6 +66,7 @@ fn successful_compiler_warnings_do_not_evict_runtime_output() {
         source_path: None,
         artifact_path: None,
         error: None,
+        cache: "cold", build_reused_from: None, preparation_ms: 0,
         build: Some(output(String::new(), "compiler warning 雪\n".repeat(1000))),
         run: Some(output("observed runtime output\n".into(), String::new())),
     };

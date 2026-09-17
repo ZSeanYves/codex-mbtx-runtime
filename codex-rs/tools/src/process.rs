@@ -45,6 +45,12 @@ pub struct ToolProcessOutput {
 /// Invocation-scoped host capability for permission-aware process execution.
 /// Implementations must honor cancellation, reap the child, and bound IO drain.
 pub trait ToolProcessExecutor: Send + Sync {
+    /// Read a host-registered output from this session only. Implementations
+    /// must not accept arbitrary paths or another session's resource IDs.
+    fn read_output_resource(&self, _id: &str, _offset: u64, _max_bytes: usize) -> Result<crate::output_archive::ResourcePage, String> {
+        Err("host output resources are unavailable".into())
+    }
+
     /// Check environment support and cancellation before preparing source files.
     fn check_available(&self, environment_id: &str) -> Result<(), String>;
 

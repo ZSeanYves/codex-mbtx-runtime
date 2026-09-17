@@ -29,6 +29,42 @@ use wiremock::MockServer;
 
 const CAPABILITIES: &str = include_str!("../../../../mbtx/fixtures/capabilities.mbtx");
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires MoonBit and cached async 0.21.3"]
+async fn filename_reuses_compilation_but_executes_fresh_and_source_changes_invalidate() -> Result<()> {
+    let server = responses::start_mock_server().await;
+    let test = configured(&server).await?;
+    let source = "fn main { println(\"original 雪\") }";
+    std::fs::write(test.workspace_path("saved.mbtx"), source)?;
+    let mut replies = Vec::new();
+    for (id, args) in [
+        ("first", json!({"source":source})),
+        ("again", json!({"filename":"saved.mbtx"})),
+        ("changed", json!({"source":"fn main { println(\"changed λ\") }"})),
+    ] {
+        replies.push(responses::sse(vec![responses::ev_response_created(id),
+            responses::ev_function_call(id, "mbtx", &args.to_string()), responses::ev_completed(id)]));
+    }
+    replies.push(responses::sse(vec![responses::ev_response_created("final"),
+        responses::ev_assistant_message("answer", "done"), responses::ev_completed("final")]));
+    let mock = responses::mount_sse_sequence(&server, replies).await;
+    test.submit_turn("Execute each supplied program, then finish").await?;
+    let last = mock.last_request().context("final request")?;
+    let mut results = Vec::new();
+    for id in ["first", "again", "changed"] {
+        let (text, _) = last.function_call_output_content_and_success(id).context("tool result")?;
+        results.push(serde_json::from_str::<Value>(&text.context("JSON result")?)?);
+    }
+    assert_eq!(results.iter().map(|r| &r["status"]).collect::<Vec<_>>(), vec![&json!("success"); 3], "{results:#?}");
+    assert_eq!(results[1]["cache"], "hit", "{results:#?}");
+    assert_eq!(results[1]["build_reused_from"], "first");
+    assert_eq!(results[1]["run"]["stdout"], "original 雪\n");
+    assert_ne!(results[0]["artifact_path"], results[1]["artifact_path"]);
+    assert_eq!(results[2]["cache"], "dependencies_reused");
+    assert_eq!(results[2]["run"]["stdout"], "changed λ\n");
+    Ok(())
+}
+
 fn toolchain() -> Result<MbtxConfig> {
     let settings = MbtxConfig {
         enabled: true,

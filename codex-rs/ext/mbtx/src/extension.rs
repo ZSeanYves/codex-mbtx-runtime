@@ -21,6 +21,7 @@ impl<C: Send + Sync> ThreadLifecycleContributor<C> for MbtxExtension<C> {
     fn on_thread_start<'a>(&'a self, input: ThreadStartInput<'a, C>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             input.thread_store.insert((self.settings)(input.config));
+            input.thread_store.insert(crate::cache::SessionCache::default());
         })
     }
 }
@@ -28,6 +29,7 @@ impl<C: Send + Sync> ThreadLifecycleContributor<C> for MbtxExtension<C> {
 impl<C: Send + Sync> ConfigContributor<C> for MbtxExtension<C> {
     fn on_config_changed(&self, _: &ExtensionData, store: &ExtensionData, _: &C, config: &C) {
         store.insert((self.settings)(config));
+        store.insert(crate::cache::SessionCache::default());
     }
 }
 
@@ -37,16 +39,19 @@ impl<C: Send + Sync> ToolContributor for MbtxExtension<C> {
         _: &ExtensionData,
         store: &ExtensionData,
     ) -> Vec<Arc<dyn for<'a> ToolExecutor<ToolCall<'a>>>> {
-        store
-            .get::<MbtxConfig>()
-            .filter(|config| config.enabled)
-            .map(|config| {
-                vec![Arc::new(MbtxTool {
+        let mut tools: Vec<Arc<dyn for<'a> ToolExecutor<ToolCall<'a>>>> = vec![];
+        if let Some(config) = store.get::<MbtxConfig>() {
+            if config.reference_directory.is_some() || config.output_directory.is_some() {
+                tools.push(Arc::new(crate::resources::ResourceTool((*config).clone())));
+            }
+            if config.enabled {
+                tools.push(Arc::new(MbtxTool {
                     config: (*config).clone(),
-                })
-                    as Arc<dyn for<'a> ToolExecutor<ToolCall<'a>>>]
-            })
-            .unwrap_or_default()
+                    cache: store.get::<crate::cache::SessionCache>().unwrap_or_default(),
+                }));
+            }
+        }
+        tools
     }
 }
 

@@ -2,6 +2,7 @@ use codex_config::mbtx::MbtxConfig;
 use codex_file_system::CopyOptions;
 use codex_file_system::CreateDirectoryOptions;
 use codex_file_system::GetMetadataOptions;
+use codex_file_system::ReadFileOptions;
 use codex_file_system::WriteFileOptions;
 use codex_tools::FunctionCallError;
 use codex_tools::ToolCall;
@@ -11,6 +12,9 @@ use codex_tools::ToolProcessStatus;
 use codex_utils_path_uri::PathUri;
 use serde::Serialize;
 use uuid::Uuid;
+use sha2::{Digest, Sha256};
+use std::time::Instant;
+use crate::cache::{SessionCache, Prepared, Compiled};
 
 use crate::tool::ProgramInput;
 
@@ -24,6 +28,9 @@ pub(crate) struct ProgramResult {
     pub build: Option<ToolProcessOutput>,
     pub run: Option<ToolProcessOutput>,
     pub error: Option<String>,
+    pub cache: &'static str,
+    pub build_reused_from: Option<String>,
+    pub preparation_ms: u64,
 }
 
 impl ProgramResult {
@@ -78,6 +85,7 @@ fn native(path: &PathUri) -> Result<String, String> {
 
 pub(crate) async fn execute(
     config: &MbtxConfig,
+    cache: &SessionCache,
     call: &ToolCall<'_>,
     input: ProgramInput,
 ) -> ProgramResult {
@@ -90,11 +98,12 @@ pub(crate) async fn execute(
         build: None,
         run: None,
         error: None,
+        cache: "miss",
+        build_reused_from: None,
+        preparation_ms: 0,
     };
     let outcome = async {
-        if input.source.is_empty() || input.source.len() > 65536 {
-            return Err("source must contain 1..65536 UTF-8 bytes".into());
-        }
+        let preparing = Instant::now();
         if input.argv.len() > 256
             || input.argv.iter().map(String::len).sum::<usize>() > 32768
             || input.argv.iter().any(|arg| arg.contains('\0'))
@@ -132,6 +141,20 @@ pub(crate) async fn execute(
         {
             return Err("cwd is not a directory".into());
         }
+        let source_text = match (&input.source, &input.filename) {
+            (Some(source), None) => source.clone(),
+            (None, Some(filename)) => {
+                let path = cwd.join(filename).map_err(|e| e.to_string())?;
+                let metadata = fs.get_metadata(&path, GetMetadataOptions::default(), sandbox).await.map_err(|e| e.to_string())?;
+                if !metadata.is_file { return Err("filename must be a regular file".into()); }
+                if metadata.size > 65536 { return Err("source exceeds 65536 UTF-8 bytes".into()); }
+                fs.read_file_text(&path, ReadFileOptions::default(), sandbox).await.map_err(|e| e.to_string())?
+            }
+            _ => return Err("provide exactly one of source or filename".into()),
+        };
+        if source_text.is_empty() || source_text.len() > 65536 {
+            return Err("source must contain 1..65536 UTF-8 bytes".into());
+        }
         let directory = cwd
             .join(&format!(".codex-mbtx/{}", Uuid::new_v4()))
             .map_err(|e| e.to_string())?;
@@ -149,7 +172,7 @@ pub(crate) async fn execute(
         let source = directory.join("program.mbtx").map_err(|e| e.to_string())?;
         fs.write_file(
             &source,
-            input.source.into_bytes(),
+            source_text.as_bytes().to_vec(),
             WriteFileOptions {
                 follow_symlinks: false,
             },
@@ -159,10 +182,15 @@ pub(crate) async fn execute(
         .map_err(|e| e.to_string())?;
         let source_path = native(&source)?;
         result.source_path = Some(source_path.clone());
-        // Even frozen Moon builds take a writable dependency-cache lock. Use an
-        // invocation-local copy through host FS permissions, never grant write
-        // access to the user's global cache or fetch dependencies in a tool call.
-        let local_cache = directory.join("dependencies").map_err(|e| e.to_string())?;
+        // Taking the generation retires it if this future is cancelled during
+        // preparation or compilation. Only a completed build publishes it again.
+        let mut state = cache.0.lock().await;
+        executor.check_available(&environment.environment_id)?;
+        let initialized = state.prepared.is_some();
+        let mut prepared = state.prepared.take().unwrap_or_else(|| Prepared {
+            directory: directory.clone(), entries: Default::default(),
+        });
+        let local_cache = prepared.directory.join("dependencies").map_err(|e| e.to_string())?;
         let cache_source = fs
             .canonicalize(&PathUri::from(dependency_cache.clone()), sandbox)
             .await
@@ -176,23 +204,44 @@ pub(crate) async fn execute(
                 "invocation scratch must not be inside the configured dependency cache".into(),
             );
         }
-        fs.copy(
+        if !initialized { fs.copy(
             &cache_source,
             &local_cache,
             CopyOptions { recursive: true },
             sandbox,
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?; }
         executor.check_available(&environment.environment_id)?;
-        let target_dir = directory.join("build").map_err(|e| e.to_string())?;
+        let target_dir = prepared.directory.join("build").map_err(|e| e.to_string())?;
         let budget = input
             .max_output_bytes
-            .unwrap_or(1024)
-            .clamp(1, 4096)
-            .min(call.response_byte_budget(32768).saturating_sub(8192) / 6);
+            .unwrap_or(65536)
+            .clamp(1, 65536)
+            .min(call.response_byte_budget(65536));
+        let dependencies = local_cache.to_abs_path().map_err(|e| e.to_string())?;
+        let compiler = std::fs::canonicalize(moon).map_err(|e| e.to_string())?;
+        let mut input_roots = vec![compiler.clone(), moonrun.to_path_buf(), dependencies.join("v1/sources").to_path_buf(), dependencies.join(".moon-cache").to_path_buf()];
+        if let Some(root) = compiler.parent().and_then(|bin| bin.parent()) {
+            for name in ["moonc", "mooninfo", "moonfmt"] {
+                let binary = root.join("bin").join(name);
+                if binary.exists() { input_roots.push(binary); }
+            }
+            let lib = root.join("lib");
+            if lib.exists() { input_roots.push(lib.to_path_buf()); }
+        }
+        let inputs = crate::cache::inputs(&input_roots, &mut state.fingerprints).map_err(|e| e.to_string())?;
+        let key = format!("{:x}", Sha256::digest(serde_json::to_vec(&(
+            &source_text, &cwd, config, inputs, "wasm", "release", "--frozen",
+        )).map_err(|e| e.to_string())?));
+        let cached = prepared.entries.get(&key).cloned();
+        result.cache = if cached.is_some() { "hit" } else if initialized { "dependencies_reused" } else { "cold" };
+        result.preparation_ms = preparing.elapsed().as_millis() as u64;
         result.stage = "compilation";
-        let mut build = executor
+        let mut build = if let Some(cached) = &cached {
+            result.build_reused_from = Some(cached.call_id.clone());
+            cached.build.clone()
+        } else { executor
             .execute(ToolProcessRequest {
                 environment_id: environment.environment_id.clone(),
                 command: vec![
@@ -215,12 +264,13 @@ pub(crate) async fn execute(
                     ("MOON_DEP_CACHE".into(), native(&local_cache)?),
                     (
                         "MOON_BUILD_CACHE".into(),
-                        native(&directory.join("build-cache").map_err(|e| e.to_string())?)?,
+                        native(&prepared.directory.join("build-cache").map_err(|e| e.to_string())?)?,
                     ),
                 ]
                 .into(),
             })
-            .await?;
+            .await? };
+        let original_build = build.clone();
         let build_ok = build.status == ToolProcessStatus::Exited && build.exit_code == Some(0);
         if build_ok {
             // Preserve at least half the combined stream budget for execution.
@@ -244,12 +294,14 @@ pub(crate) async fn execute(
         let remaining = budget.saturating_sub(build.stdout.len() + build.stderr.len());
         result.build = Some(build);
         if !build_ok {
+            if original_build.status == ToolProcessStatus::Exited { state.prepared = Some(prepared); }
             return Ok(());
         }
         result.stage = "execution";
         let artifact = target_dir
             .join("wasm/release/build/single/single.wasm")
             .map_err(|e| e.to_string())?;
+        let compiled = if let Some(cached) = cached { cached } else {
         if !fs
             .get_metadata(
                 &artifact,
@@ -264,7 +316,16 @@ pub(crate) async fn execute(
         {
             return Err("compiler did not produce the expected regular Wasm artifact".into());
         }
-        let artifact_path = native(&artifact)?;
+        let bytes = fs.read_file(&artifact, ReadFileOptions { follow_symlinks: false }, sandbox).await.map_err(|e| e.to_string())?;
+        let compiled = Compiled { bytes, build: original_build, call_id: call.call_id.clone() };
+        prepared.entries.insert(key, compiled.clone());
+        compiled
+        };
+        let execution_artifact = directory.join("program.wasm").map_err(|e| e.to_string())?;
+        fs.write_file(&execution_artifact, compiled.bytes, WriteFileOptions { follow_symlinks: false }, sandbox).await.map_err(|e| e.to_string())?;
+        state.prepared = Some(prepared);
+        drop(state);
+        let artifact_path = native(&execution_artifact)?;
         result.artifact_path = Some(artifact_path.clone());
         let mut command = vec![
             moonrun.to_string_lossy().into_owned(),

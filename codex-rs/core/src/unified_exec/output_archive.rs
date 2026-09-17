@@ -12,7 +12,7 @@ impl Archives {
         let Some(context) = context else { return Ok(Self::default()); };
         let Some(root) = &context.step_context.turn.config.mbtx.output_directory else { return Ok(Self::default()); };
         let streams = [if tty { "pty" } else { "stdout" }, "stderr"];
-        streams.into_iter().map(|stream| OutputArchive::create(root, &context.call_id, "shell", stream))
+        streams.into_iter().map(|stream| OutputArchive::create(&root.join(context.session.thread_id.to_string()), &context.call_id, "shell", stream))
             .collect::<std::io::Result<Vec<_>>>().map(Self)
             .map_err(|e| UnifiedExecError::create_process(format!("cannot prepare output evidence: {e}")))
     }

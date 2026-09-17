@@ -39,6 +39,12 @@ use crate::tools::sandboxing::ToolRuntime;
 pub(super) struct CoreProcessExecutor(pub(super) Weak<ToolInvocation>);
 
 impl ToolProcessExecutor for CoreProcessExecutor {
+    fn read_output_resource(&self, id: &str, offset: u64, max_bytes: usize) -> Result<codex_tools::output_archive::ResourcePage, String> {
+        let invocation = self.0.upgrade().ok_or("tool invocation has ended")?;
+        let root = invocation.step_context.turn.config.mbtx.output_directory.as_ref().ok_or("output archive is not configured")?;
+        codex_tools::output_archive::read_output(&root.join(invocation.session.thread_id.to_string()), id, offset, max_bytes).map_err(|error| error.to_string())
+    }
+
     fn check_available(&self, environment_id: &str) -> Result<(), String> {
         let invocation = self.0.upgrade().ok_or("tool invocation has ended")?;
         if invocation.cancellation_token.is_cancelled() {
@@ -231,7 +237,7 @@ impl ToolRuntime<ProcessRequest, ToolProcessOutput> for ProcessRuntime {
             .map_err(ToolError::Codex)?;
         let archives = if let Some(root) = &ctx.step_context.turn.config.mbtx.output_directory {
             ["stdout", "stderr"].into_iter().map(|stream|
-                codex_tools::output_archive::OutputArchive::create(root, &ctx.call_id, req.process.phase, stream)
+                codex_tools::output_archive::OutputArchive::create(&root.join(ctx.session.thread_id.to_string()), &ctx.call_id, req.process.phase, stream)
             ).collect::<std::io::Result<Vec<_>>>().map_err(|error| ToolError::Rejected(format!("cannot prepare output evidence: {error}")))?
         } else { vec![] };
         execute_bounded_request(exec, req.process.max_output_bytes, archives)
