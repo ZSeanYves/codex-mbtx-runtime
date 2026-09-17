@@ -1,553 +1,204 @@
-# Programmable MBTX Architecture
+# Programmable MBTX architecture
 
-**Status:** Accepted architecture. Bounded stage-one validation passed on macOS ARM64 and Linux x86_64; stage-two Linux replay evidence was independently reconstructed. Stage-three pilot collection, reports and observation adapters are implemented. Stage records distinguish local checks from pending Linux and live research acceptance.
-**Baseline inspected:** `31ffe2bc9adccfe5fd3d29208250f796a13aa7a0` on 2026-09-15.
-**Scope:** The `ZSeanYves/codex-mbtx-runtime` fork of `openai/codex`.
-
-This document defines the responsibilities, dependency boundaries, runtime
-contracts, and evidence requirements for programmable MBTX research. It is the
-authoritative architecture for this fork. The [stage-one implementation record](mbtx-stage-one.md)
-documents the tool, target decision, validation and limitations. The
-[stage-two record](mbtx-stage-two.md) covers logical steps and request accounting.
-
-The initial foundation reserved directories using `.gitkeep` files. Stage one
-activated the product extension, host bridge, fixtures and thin validation
-entry. Stage two activates the shared MoonBit accounting package and its
-executable. Stage three activates the Rust adapter, shared task oracles,
-comparative pilot reports and standard OTLP import. The
-[stage-three guide](mbtx-stage-three.md) records the executable protocol and
-remaining Linux, viewer and research acceptance boundaries. The
-[expanded study protocol](mbtx-study-protocol.md) freezes the post-pilot task
-families, reusable-program acceptance, paired assignment and uncertainty rules.
-
-## Contents
-
-- [Purpose and scope](#purpose-and-scope)
-- [Verified upstream foundation](#verified-upstream-foundation)
-- [Repository and package structure](#repository-and-package-structure)
-- [Dependencies and ownership](#dependencies-and-ownership)
-- [Program tool contract](#program-tool-contract)
-- [Execution, permissions, and lifecycle](#execution-permissions-and-lifecycle)
-- [Toolchain, target, and build reuse](#toolchain-target-and-build-reuse)
-- [Step and request accounting](#step-and-request-accounting)
-- [Evidence and recovery](#evidence-and-recovery)
-- [Experimental design and request pacing](#experimental-design-and-request-pacing)
-- [Observability and reports](#observability-and-reports)
-- [Build, validation, and integration](#build-validation-and-integration)
-- [Implementation stages and open decisions](#implementation-stages-and-open-decisions)
+Status: implemented research architecture for the `ZSeanYves/codex-mbtx-runtime`
+fork. The current experimental contract is
+[programmable-long-study-v1](mbtx-long-study.md). Linux online research acceptance
+is separate from local fixed-replay validation.
 
 ## Purpose and scope
 
-The research question is:
+The fork compares a programmable MoonBit tool with Codex's existing Shell tool
+for autonomous task completion. The primary outcomes are success and accepted
+model decisions to success. It is not the historical transparent-launcher
+compatibility experiment. Upstream directories retain their normal locations
+so builds, upstream merges, tooling and third-party integration remain usable.
+The upstream Shell path stays the default. MBTX is explicitly enabled.
 
-> Under the same task goal, model, available capabilities, permissions, and
-> correctness oracle, does a programmable MoonBit interface reduce the logical
-> agent steps needed to complete work compared with a Shell execution tool?
+## Package ownership
 
-The primary outcomes are task success and steps to success. Tool calls,
-compilation errors, repair attempts, tokens, process operations, and timing
-explain the outcome. Fewer steps alone do not establish lower latency, lower
-cost, less model reasoning, or fewer machine instructions.
+| Location | Responsibility |
+|---|---|
+| `codex-rs/ext/mbtx` | Tool registration, source/file input, compiler plan, per-session compilation cache, bounded previews and reference/resource tool |
+| `codex-rs/tools` | Shared host process contract, full stream archive and UTF-8 resource pagination |
+| `codex-rs/core` | Narrow bridge to existing policy, approval, sandbox, environment, cancellation and unified execution services |
+| `codex-rs/config` | Explicit MBTX configuration and validation |
+| `codex-rs/rollout-trace` | Native append-only observations, payload references, reduction and logical step relationships |
+| `mbtx/evaluation` | Task definitions, private oracles, status classification, step accounting, timing interpretation and statistics |
+| `mbtx/cmd/evaluation-model` | Prebuilt MoonBit JSON-stream analysis worker |
+| `codex-rs/mbtx-eval` | Actual Codex/OS/HTTP execution, request gate, immutable evidence, worker receipts, adapters and rendering |
+| `codex-rs/mbtx-eval/web` | Embedded offline HTML interface and pinned ECharts assets |
+| `mbtx/reference` | Verified general language/API/tool guidance visible to both arms |
+| `mbtx/scripts` | Thin `.mbtx` preparation, validation, collection and packaging entries |
+| `mbtx/config` | Non-secret model/relay defaults |
 
-Use two experiment arm labels: `shell_tool` and `mbtx_program`. These describe
-research conditions, not existing configuration keys. Shell remains the product
-default. Programmable MBTX requires explicit enablement.
-
-| Repository                                                            | Responsibility                                                                                                                  |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [codex-mbtx-runtime](https://github.com/ZSeanYves/codex-mbtx-runtime) | Programmable tool implementation, step research, and its evidence contracts.                                                    |
-| [Codex-MBTX](https://github.com/ZSeanYves/Codex-MBTX)                 | Existing transparent launcher, compatibility/performance measurements, OTel collection, process traces, and historical reports. |
-
-This fork does not add a transparent-launcher cohort or reuse its measurements
-as evidence of a programmable tool's benefit. It does not introduce a separate
-agent loop, shell parser, general jobs protocol, or independent session manager.
-Persistent language sessions, remote MBTX execution, delegation, and Code Mode
-comparisons are outside the first implementation.
-
-The fork must build and run without a checkout of the old repository. Reusable
-code is copied selectively with source revision, license, and relevant tests
-recorded. Historical reports and raw evidence retain their original conclusions
-and hashes; they are not migrated into new experimental results.
-
-## Verified upstream foundation
-
-The following are observations about the inspected baseline. Recheck affected
-interfaces after an upstream update.
-
-| Existing area                                                                                                                                 | Observed responsibility                                                                          | Architectural use                                                                                          |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| [Rust workspace](../codex-rs/Cargo.toml)                                                                                                      | Explicit workspace members and shared dependencies.                                              | Add small crates within the existing workspace when implementation begins.                                 |
-| [Tool contributors](../codex-rs/ext/extension-api/src/contributors.rs) and [tool calls](../codex-rs/tools/src/tool_call.rs)                   | Feature-owned tools, lifecycle callbacks, payloads, filesystem environments, and result context. | Register MBTX through the existing extension mechanism.                                                    |
-| [Extension assembly](../codex-rs/app-server/src/extensions.rs)                                                                                | Host construction of the extension registry.                                                     | Install the feature at an appropriate host composition point.                                              |
-| [unified_exec handler](../codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs) and [exec-server](../codex-rs/exec-server/README.md) | Host execution orchestration and subprocess services.                                            | Reuse policy, sandbox, process, and output handling through a narrow bridge.                               |
-| [Rollout trace](../codex-rs/rollout-trace/README.md)                                                                                          | Raw local bundles and an offline semantic reducer.                                               | Preserve native evidence and identity relationships.                                                       |
-| [Inference tracing](../codex-rs/rollout-trace/src/inference.rs)                                                                               | Attempt IDs for concrete upstream requests, including retry/fallback paths.                      | Associate attempts with a separately established logical step.                                             |
-| [Sampling loop](../codex-rs/core/src/session/turn.rs) and [step context](../codex-rs/core/src/session/step_context.rs)                        | Sampling control and request-scoped state.                                                       | Establish the logical-round boundary without guessing from log counts.                                     |
-| [OTel](../codex-rs/otel/README.md)                                                                                                            | Log, trace, and metric export plus session telemetry.                                            | Extend existing instrumentation and export to a local collector.                                           |
-| [Responses API proxy](../codex-rs/responses-api-proxy/README.md)                                                                              | A constrained OpenAI forwarding service.                                                         | Inspect reuse opportunities; arbitrary relay routing and account-wide pacing are not assumed capabilities. |
-
-Two integration boundaries require explicit implementation. Stage one supplies
-a bounded host execution capability rather than letting the extension bypass
-policy and sandbox services. Stage two associates `inference_call_id` request
-attempts with independently observed logical sampling rounds. Their current
-coverage is documented in the stage records; directory scaffolding alone does
-not establish either capability.
-
-## Repository and package structure
-
-Keep upstream directories in place so merges, source links, and build targets
-continue to work. The structural addition is deliberately small:
-
-```text
-codex-mbtx-runtime/
-├── codex-rs/                         # Existing Cargo workspace
-│   ├── core/, tools/, exec-server/   # Existing host services
-│   ├── rollout-trace/, otel/         # Existing observation services
-│   ├── ext/mbtx/
-│   │   ├── src/                     # Programmable MBTX extension
-│   │   └── tests/.gitkeep
-│   └── mbtx-eval/
-│       ├── Cargo.toml, BUILD.bazel   # Active collection adapter
-│       └── src/                     # OS/HTTP facts, replay and rendering
-├── mbtx/
-│   ├── moon.mod                     # Shared MoonBit analysis module
-│   ├── evaluation/                  # Tasks, oracles, step analysis and reports
-│   ├── cmd/evaluation-model/        # Structured JSON analysis executable
-│   ├── fixtures/                     # Fixed inputs and example programs
-│   ├── scripts/                      # Thin .mbtx automation
-│   ├── config/                       # Public templates, no credentials
-│   └── observability/               # Standard Collector configuration
-├── docs/mbtx-architecture.md         # This document
-├── codex-cli/, sdk/                  # Existing distribution and SDK areas
-└── scripts/, tools/, .github/        # Existing upstream engineering tools
-```
-
-There is no second MBTX documentation tree. Architecture, protocol, and running
-instructions belong under root `docs/`, with links from the README. Keep these
-documents in English and distinguish designed behavior from implemented behavior.
-
-| Package                                                           | Owner and public surface                                                                                                                                                                                                                      |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `codex-rs/ext/mbtx`, crate `codex-mbtx-extension`                 | Tool registration, input validation, program preparation, compiler invocation, cache decisions, and structured tool outcomes. Export installation/configuration and the smallest required host contract; keep implementation modules private. |
-| `codex-rs/mbtx-eval`, crate `codex-mbtx-eval`, binary `mbtx-eval` | Real Codex execution/replay, OS/HTTP observation, artifact persistence, native trace reduction, and report/OTLP adapters. It collects facts rather than deciding task correctness or statistical inclusion.                                   |
-| `mbtx/evaluation`, in the MoonBit module rooted at `mbtx/` | Step aggregation, coverage, pilot and expanded tasks, independent visible/withheld output oracles, failure classification, populations and stratified hierarchical paired uncertainty. |
-| `mbtx/cmd/evaluation-model`                                       | A small prebuilt executable exposing the evaluation package to the Rust CLI through a versioned structured stream. No duplicate analysis logic.                                                                                               |
-
-Add valid `Cargo.toml`, `BUILD.bazel`, workspace membership, `moon.mod`, and
-`moon.pkg` files only as the associated package becomes runnable. Empty manifests
-would imply invalid packages and must not be used as placeholders. A directory
-name is not a MoonBit package until it has package metadata. The MoonBit module
-coordinate will be set at activation to match this fork, not the old launcher.
-
-Potential private Rust files include `tool.rs`, `program.rs`, `compiler.rs`,
-`cache.rs`, and `execution.rs`. Potential analysis files include `model.mbt`,
-`tasks.mbt`, `oracle.mbt`, `steps.mbt`, and `statistics.mbt`. These are organization
-guidelines, not a requirement to create empty source files or separate packages.
-
-## Dependencies and ownership
-
-Product code must not depend on the evaluator, task fixtures, report generators,
-SigNoz, or the old research repository. Avoid cyclic dependencies between the
-extension and `codex-core`. A host implementation of the narrow execution
-contract can use internal services; the extension consumes that capability.
-Place the contract in a suitable lower-level existing crate if that is needed
-to keep the dependency graph acyclic.
+Product crates must not depend on benchmark tasks, hidden oracles, reports or the
+old research repository. The extension consumes a narrow host capability; it
+does not embed a second HTTP model client or a competing process/sandbox system.
+Rust adapters normalize observed facts. Evaluation decisions live in MoonBit.
+Report renderers present the shared analysis model rather than implementing
+another statistical rule set.
 
 ```mermaid
 flowchart TD
-    H[Codex host composition] --> X[MBTX extension]
-    H --> B[Host execution bridge]
-    X --> A[Shared tool and execution contracts]
-    B --> A
-    B --> C[Codex policy and execution services]
-    X --> M[Official MoonBit tools via host execution]
-    E[Evaluation CLI] --> N[Native trace reducer and Codex client]
-    E --> W[Prebuilt analysis executable]
-    W --> P[MoonBit evaluation package]
-    E --> O[Evidence and optional OTLP export]
+  Codex[Codex composition and agent loop] --> Extension[MBTX extension]
+  Codex --> Host[Existing policy and execution services]
+  Extension --> Contract[Shared host process and resource contracts]
+  Host --> Contract
+  Eval[Evaluation CLI] --> Process[Actual Codex executable]
+  Eval --> Gate[Serial Responses gate]
+  Eval --> Native[Native trace reducer]
+  Eval --> Analysis[Prebuilt MoonBit evaluation worker]
+  Eval --> Evidence[Immutable raw attempts]
+  Evidence --> Reports[Shared analysis and offline reports]
 ```
 
-The arrows describe allowed dependencies, not a finalized set of Rust traits.
-Do not create another general execution abstraction before checking existing
-contracts. Shared Codex fixes must affect both experiment arms and remain
-distinguishable from MBTX-specific changes.
-
-| State or behavior                                                             | Owner                                                    |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Model loop, tool exposure, session, permissions, cancellation authority       | Codex host.                                              |
-| Source representation, dependency declaration, build plan, cache identity     | MBTX extension.                                          |
-| Processes, bounded output, wait/reap, environment routing                     | Existing Codex services through the host bridge.         |
-| Task schedule, request gate, attempt allocation, raw file writes              | Evaluation CLI and its observation adapters.             |
-| Oracle, step semantics, analysis populations, failure attribution, statistics | MoonBit evaluation package.                              |
-| Native trace schema and reduction                                             | `codex-rollout-trace`; extend only missing observations. |
-| Interactive inspection                                                        | SigNoz; persisted evidence remains authoritative.        |
-
-Use existing workspace dependencies for serialization, async work, errors, and
-tracing. Prefer `serde`, `serde_json`, `tokio`, `thiserror`, and `tracing` where
-already available rather than introducing overlapping libraries. Do not embed a
-second HTTP model client in MBTX. The evaluator drives the actual Codex client.
-
-MoonBit core and additional libraries must have concrete task needs. Dependency
-installation occurs during bundle preparation; model-submitted programs cannot
-silently download packages during a measured invocation. The approved imports,
-toolchain, and package contents are recorded and visible in tool instructions.
-Node/pnpm retain their upstream packaging/SDK role. They are not an additional
-MBTX program runtime. SigNoz and its services remain optional for tool use.
-
-## Program tool contract
-
-The initial interface accepts one program per invocation, with no persistent
-language heap. Files in the permitted workspace can preserve task state. The
-following fields define the initial tool contract; stage one implements them:
-
-| Input                                | Required behavior                                                                                           |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `source`                             | Bounded UTF-8 MoonBit program text; preserve submitted bytes and compiler diagnostics.                      |
-| `argv`                               | Literal string arguments; never reconstruct them by joining a shell command.                                |
-| `cwd`                                | Resolve through the selected Codex environment and enforce its filesystem policy.                           |
-| `build_timeout_ms`, `run_timeout_ms` | Separate requested budgets, clamped to host limits; cancellation also covers preparation and queueing.      |
-| `max_output_bytes`                   | Bounded combined delivery budget with separate stream/truncation metadata, subject to Codex context limits. |
-
-Runtime target, installed compiler path, dependency policy, and artifact cache
-location are host configuration. The model cannot override executable identity
-or grant itself permissions through a tool argument. Missing tools, unsupported
-environments, and invalid configuration produce explicit errors; no fallback to
-Shell or another compilation target occurs silently.
-
-The result distinguishes preparation, compilation, execution, and finalization.
-Return bounded diagnostics, stdout/stderr, exit code and observed signal, timeout
-or cancellation state, truncation flags, and stable artifact references where
-supported. Keep raw signal termination separate from a numeric exit of 128 plus
-that signal. Unobserved values remain `null` or explicitly `unknown`.
-
-Compilation errors are model-visible tool outcomes. Infrastructure problems
-starting the compiler differ from valid compiler rejection of source. Preserve
-the source and diagnostic so a following repair can be inspected. Do not
-silently rewrite or repair model code. The product's runtime outcome and the
-research oracle's task-success decision are separate records.
-
-The user-facing tool description should explain programming capabilities,
-available imports, permissions, and output limits. Evaluation IDs, cache hashes,
-trace transport, and statistical rules belong in evidence, not routine model
-instructions unless they affect a legitimate programming choice.
-
-## Execution, permissions, and lifecycle
-
-```mermaid
-sequenceDiagram
-    participant C as Codex
-    participant T as MBTX extension
-    participant H as Host execution bridge
-    participant P as Compiler / program
-    C->>T: Dispatch submitted program
-    T->>H: Request bounded preparation/build
-    H->>H: Apply effective permission and sandbox policy
-    H->>P: Run compiler in controlled environment
-    P-->>T: Build outcome and artifact reference
-    opt Compilation succeeded
-        T->>H: Request execution with literal argv
-        H->>P: Execute under effective policy
-        H->>H: Observe exit, reap, drain streams
-        H-->>T: Structured execution outcome
-    end
-    T-->>C: Bounded result with explicit failure stage
-```
-
-The diagram is the lifecycle contract. Stage one always compiles. A future cache
-hit may skip compilation, but never execution authorization or artifact validation.
-
-Source preparation, compiler subprocesses, generated programs, and descendants
-all operate within the effective Codex authority. Whole-program approval does
-not automatically provide Shell command-prefix approval semantics. Define what
-is approved, which nested operations are allowed, and what triggers escalation
-before claiming policy equivalence. File access through extension helpers must
-use host filesystem capabilities rather than unrestricted host I/O.
-
-Reuse the host environment, sandbox construction, cancellation ownership, and
-process handling. Do not recursively call the model-visible `exec_command` tool
-to implement MBTX, and do not bypass policy with an independent process manager.
-The first implementation covers local Linux/macOS; unsupported MBTX environments
-fail explicitly while upstream Shell behavior remains available.
-
-Cancellation follows request, identify owned process scope, signal, bounded
-grace, escalation if needed, wait/reap, and bounded stream drain. Record the
-actual outcome of each available observation. A bounded cleanup failure may
-produce a terminal failure with incomplete cleanup; it must not become success
-or hang forever waiting for inherited output pipes.
-
-Only clean up processes attributable to the invocation, using process identity
-and process-group evidence. Never scan and kill all processes belonging to the
-UID. A fallback cleanup does not erase a residue observed before cleanup. Detached
-descendants and inaccessible reap state remain explicit boundaries.
-
-## Toolchain, target, and build reuse
-
-The inspected upstream pins Rust in [rust-toolchain.toml](../codex-rs/rust-toolchain.toml)
-to `1.95.0`. Keep the upstream pin until a justified update. MoonBit development
-may follow the latest supported release; each experiment freezes the actual
-compiler/runtime versions and dependency contents for its complete run.
-
-The first program target is **`wasm` with official `moonrun`**, chosen after a
-native/Wasm capability prototype. The [implementation record](mbtx-stage-one.md)
-identifies the tested tools and platform. File access, JSON, child processes,
-UTF-8/stdio, exit semantics, policy and cancellation require actual execution
-checks. A Wasm host policy alone is not evidence that a spawned native child is
-confined; OS enforcement still needs validation. The evaluator's target remains
-an independent future build choice.
-
-| Cost                                                                             | Treatment                                                             |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Codex, evaluator, compiler installation, fixed dependencies, fixture preparation | Build or prepare once per bundle; report cold preparation separately. |
-| Compilation of newly submitted model source                                      | Real tool work, including diagnostics and failed compilation.         |
-| Cache lookup and reuse of a valid compiled program                               | Record hit/miss and lookup work; never call it a fresh compilation.   |
-| Execution of the resulting program and its children                              | Real tool work, with observed lifecycle boundaries.                   |
-| Evidence persistence and telemetry export                                        | Observation cost; measure separately where possible.                  |
-
-Bundle identity includes source revisions, toolchain/runtime versions, dependency
-locks or content hashes, platform/architecture, target, profile, build options,
-fixture hashes, and observation configuration. Documentation-only changes must
-not invalidate compiler artifacts; a run still records its exact source commit.
-
-Program cache keys include exact source, dependency set, compiler/runtime,
-target/profile, and every effective build input. Publish entries atomically;
-reject incomplete or mismatched entries. Cached artifacts are not writable by
-task programs. Always reapply current execution policy.
-
-For formal tasks, share immutable tools and dependency artifacts while keeping
-model-program caches and mutable workspaces independent per arm/attempt. Any
-warm program-cache experiment is a separately declared condition. No evaluation
-rule precompiles or repairs the source the model has yet to submit.
-
-## Step and request accounting
-
-An `agent_step` is one logical sampling round entered by the task's agent loop.
-It completes when the response is accepted by that loop. Include the accepted
-final answer. Several tool calls from one response remain one step; their
-execution and results are associated with that response. A transport retry or
-fallback for the same logical round does not create a new logical step.
-
-Supplement the native trace at the logical-round boundary and propagate that
-identity into request attempts and tool dispatch. Establish where a retry ends
-and a new model decision begins in the actual loop. A `StepContext` object or
-one invocation of a helper is not automatically a persistent step identity.
-Lower-level wire retries may not have separate native inference IDs; count real
-HTTP requests at the observation boundary and retain their associations.
-
-| Metric                                   | Definition                                                                     |
-| ---------------------------------------- | ------------------------------------------------------------------------------ |
-| `agent_steps_started`                    | Logical task rounds entered, including unsuccessful/interrupted rounds.        |
-| `agent_steps`                            | Task rounds whose responses the loop accepted.                                 |
-| `model_requests`, `transport_retries`    | Observed requests and retries, with request purpose and coverage.              |
-| `tool_calls`, `tool_executions`, `polls` | Model-emitted calls, dispatched executions, and explicit polling operations.   |
-| `tool_errors`, `repair_steps`            | Recorded failures and subsequent repair rounds with a stated attribution rule. |
-| `process_spawns`                         | Observed process starts with observer/platform coverage.                       |
-| `success`, `status`, `failure_class`     | Independent oracle result, execution outcome, and attributed cause.            |
-
-Examples: one accepted response containing three tool calls followed by an
-accepted final answer is two steps and three tool calls. A 429 followed by a
-successful retry of the same round is two requests and one completed step. A
-429 that ends the task has a started round and no completed response, not a
-zero-step success. Reading or reducing a persisted log adds no steps.
-
-Record incomplete responses and any tools they already dispatched; never assume
-a retry had no side effects. Compaction and other auxiliary requests remain in
-request/token totals with their purpose, outside task-step totals. Missing usage
-is unknown. Repair attribution is `observed`, `inferred`, or `unknown` with a
-source reference; an error followed by another round does not by itself prove
-the next round was a repair. Do not add these different counters into one total.
-
-## Evidence and recovery
-
-Retain native rollout bundles and model inputs/outputs rather than substituting
-a report's reconstruction for the original data. The evaluator adds experiment
-metadata and normalized facts with references to source events and payloads.
-Reuse the upstream reducer; analysis rules live only in the MoonBit package.
-
-| Evidence group | Required identities or values                                                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Experiment     | Schema/protocol version, run, pair, attempt, arm, task, fixture, bundle, platform, schedule seed, and effective configuration without credentials. |
-| Agent          | Thread, turn, logical step, native inference attempt, wire request, model-visible tool call, and parent/causal links.                              |
-| Event          | Producer, event ID/sequence, phase, status, timestamp, clock domain, and source file/hash/reference.                                               |
-| Process        | PID and available birth identity, PGID, spawn/wait observations, exit code, signal, per-stream bytes/EOF, and truncation.                          |
-| Coverage       | Missing events, observation profile, evidence completeness, oracle outcome, and attribution confidence.                                            |
-
-Identifiers from different domains are not interchangeable. Sequence numbers
-establish producer order, not a universal cross-process clock. Preserve native
-times; add an OS monotonic timestamp before evidence I/O where that boundary is
-instrumented. Only subtract compatible clocks. Derived timestamps carry their
-alignment method and uncertainty.
-
-Allocate an attempt directory exclusively. Append raw observations while it is
-open, then seal a terminal manifest atomically with file hashes and completeness
-state. Never replace an existing attempt on retry or resume. Interrupted attempts
-retain their valid event prefix and damaged tail, if any; recovery writes a new
-assessment record instead of repairing raw bytes. A new execution gets a new
-attempt ID. Reports identify the exact raw files and analysis version used.
-
-Keep execution outcome, evidence completeness, and oracle success separate. Use
-failure causes such as tool/compiler/runtime, relay, provider, harness, timeout,
-cancelled, and unknown with a stage and evidence. An oracle can pass while final
-delivery fails externally. Missing trace data can restrict step analysis without
-changing the observed task outcome. Do not convert relay failures into MBTX bugs.
-
-Native trace writes are best-effort. Explicitly check required evidence rather
-than interpreting absent records as zero operations. Partial reports must be
-possible after kill, disconnection, malformed input, or exporter failure.
-
-Keep credentials and unreviewed payloads out of Git. Store local raw runs outside
-the source tree or in an explicitly ignored run location. Publish reviewed
-artifacts with checksums and a reproducible manifest; record redacted derivatives
-separately rather than changing already sealed evidence. Dataset publication
-location is an operational decision, not a product runtime dependency.
-
-## Experimental design and request pacing
-
-Use goal prompts and independent acceptance oracles. Shell may submit complete
-scripts; MBTX may submit complete programs. Do not force Shell to split work to
-create an advantage. Record capabilities and tool descriptions as the treatment.
-If the arms receive different libraries or utilities, describe the result as a
-comparison of those configured interfaces, not a language-only causal claim.
-
-Freeze model/reasoning settings, common instructions, permissions, context and
-output budgets, installed dependencies, fixtures, tool schemas, and termination
-rules. Each arm receives an independent workspace, HOME, session, and mutable
-state. Keep shared file tools identical. Expose only the assigned execution
-tool; disable Code Mode and delegation in the initial experiment. Shell commands
-invoked inside MBTX remain observed child work.
-
-Use adjacent AB/BA pairs and a fixed task-order seed. Define goal-oriented tasks
-for repository inspection, structured data, file transformation, orchestration,
-diagnostics, repair, output handling, and recovery. Exact tasks, sample size,
-step/tool/token budgets, repeats, timeouts, and analysis rules must be frozen in
-a versioned protocol after a pilot and before formal collection. Pilot data is
-separate. The historical launcher task matrix is not this experiment's coverage.
-
-Report intention-to-treat success, success by step budget, and failure rates for
-all assigned attempts. Report paired step differences among pairs where both
-arms succeeded with complete step evidence as a conditional analysis. Preserve
-unfinished and external-failure attempts in the original accounting. Use paired,
-task-aware uncertainty estimates with a fixed analysis seed. Repeated samples
-of the same task do not establish broad task generalization.
-
-All evaluation API traffic passes through one gate, including probes, auxiliary
-requests, and retries if a declared diagnostic permits them. Hold the concurrency
-slot for the entire upstream response stream, not just response headers. The
-initial policy is concurrency one and at least 15 seconds between request
-starts. Record queue wait separately from request duration.
-
-Disable automatic request/stream retries for formal collection wherever the
-actual transport permits, and verify wire traffic rather than trusting config.
-Preserve 429 outcomes. Later requests wait for valid `Retry-After` instructions
-or 30 seconds when absent/invalid, as well as the normal pacing interval. Do not
-replay partially executed tool work automatically. Other applications using the
-same account are outside the gate, so this policy cannot guarantee zero 429s.
-
-Use a pilot's actual request counts and streaming durations to estimate total
-time. Change pacing only before a formal run or record a new protocol condition.
-Initial relay qualification needs one success out of three probes. Pause and
-produce partial artifacts after five consecutive final infrastructure failures,
-at least eight infrastructure failures among the latest 16 completed arms, or
-loss of a core collector component. Expected task cancellation is not an
-infrastructure failure. Failure of one arm must not discard its pair.
-
-## Observability and reports
-
-Native traces provide the evidence graph. Native OTel plus narrowly added MBTX
-events feed a local collector; SigNoz is the preferred interactive viewer.
-Audit existing instrumentation before adding spans. The collector and viewer
-run once per experiment session, not once per arm. Archive observations before
-relying on viewer retention. Collector transport/version details require a
-small import validation before being declared supported.
-
-Views should show task/arm filters, success by step budget, paired step counts,
-request attempts, compiler outcomes, tool execution, and the first observed
-trajectory divergence. Each aggregate must link to attempt identities and raw
-evidence; each trace must identify the source dataset. Divergence is a fact to
-inspect, not automatic proof of a cause. Avoid creating another custom trace UI.
-
-Show build/cache lookup, local scheduling, approval, sandbox, process execution,
-output publication, external request intervals, shutdown, and observation costs
-where instrumented. Keep unknown portions visible. Without trusted server data,
-model compute and relay-internal waiting cannot be separated. Overlapping spans
-must not be summed into an invented end-to-end decomposition.
-
-Both arms use the same observation profile. Calibrate its effect with small
-fixed replays and minimal/full observation variants when reporting timing.
-Equal instrumentation is not proof of zero perturbation, especially when the
-arms emit different amounts of data. Keep exporter flush time distinct from
-task completion and bound shutdown. Step counts still require complete events.
-
-The `mbtx-eval` CLI exposes the following operations. It uses the prebuilt
-`evaluation-model` worker for the shared analysis described in the
-[accounting guide](mbtx-stage-two.md) and the pilot protocol:
-
-| Operation                                 | Contract                                                                                                                              |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                                     | Execute actual Codex tasks in a declared replay or relay condition using a prebuilt bundle. No launcher cohort in this fork.          |
-| `replay RUN`                              | Execute fixed responses/tool trajectories into new attempts; validate runtime behavior and counting, without mutating the source run. |
-| `log RUN --follow`                        | Show planned/completed attempts, success, failures, current phase, and separately measured pacing waits.                              |
-| `report RUN --format json\|csv\|md\|html` | Reduce retained evidence and produce the same analysis model without current API credentials or an active viewer.                     |
-
-Upstream `codex debug trace-reduce` already reduces a native trace bundle; it is
-not a new execution and is not a measurement of step efficiency. Fixed-response
-execution validates the pipeline, but its prescribed trajectory cannot prove
-that MBTX makes a live model use fewer steps. Offline HTML is a readable report
-summary with escaped content and evidence links; SigNoz supplies interactive
-inspection. All reports state observation/inference/unknown boundaries.
-
-## Build, validation, and integration
-
-Cargo builds product and Rust adapter crates; MoonBit builds its analysis
-executable. Integrate actual new crates with Cargo and Bazel together. Honor
-[repository instructions](../AGENTS.md), including config schema regeneration
-when introducing supported configuration. Do not regenerate a separate Codex
-checkout, apply a hidden patch at collection time, or maintain competing locks.
-
-Use the single bundle preparation entry, `mbtx/scripts/prepare-evaluation.mbtx`.
-The measured loop invokes prebuilt components and never uses `cargo run`, starts
-the analysis compiler per arm, or reinstalls dependencies. One analysis worker
-can handle a run/report session through a versioned JSON stream. Keep parsing
-and protocol validation in the adapter; keep evaluation decisions in MoonBit.
-
-Schema versions cover normalized facts and analysis results. Preserve producer
-and reducer versions for upstream raw schemas. Reject unsupported major shapes
-explicitly; retain unknown optional fields and missing values. Regenerating a
-report under changed rules produces a separately identified analysis artifact.
-
-| Validation layer       | Intended scope                                                                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Documentation/scaffold | Formatting, local links, empty placeholders, and unchanged active package membership. No behavioral claims.                                 |
-| Fast PR checks         | Changed Rust/MoonBit packages, tool contracts, deterministic processes, counting, schemas, and formatting; no relay.                        |
-| Offline integration    | Build Codex and fixed fixtures once; real tool/policy/lifecycle paths, fixed Responses playback, fault/recovery, and report reconstruction. |
-| Online collection      | User-operated Linux pilot/formal runs with recorded bundle and pacing; macOS is an independent dataset.                                     |
-
-Retain relevant upstream checks. Add one aggregate status for MBTX validation
-when workflows exist, with path-aware dependencies so documentation changes do
-not trigger a Codex or fixture build. Cache keys include actual source/build
-inputs, toolchain, locks, platform, target, profile, and fixture identity. A
-second unchanged bundle preparation must reuse completed artifacts.
-
-## Implementation stages and open decisions
-
-| Stage                         | Deliverable and acceptance evidence                                                                                                                                                                                                                                        |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Foundation                    | Completed: architecture and directory reservations.                                                                                                                                                                                                                       |
-| Capability prototype and tool | Completed: unmodified baseline build and native/Wasm target comparison on macOS; bounded tool validation on macOS ARM64 and Linux x86_64. The [stage-one record](mbtx-stage-one.md#linux-validation-record) preserves the Linux transcript, coverage and evidence limits. |
-| Step identity                 | Implemented: native logical-round associations, HTTP sends, MoonBit accounting and fixed replay. The [stage-two record](mbtx-stage-two.md) includes reconstruction of all eight user-supplied Linux captures. |
-| Evaluation and observation    | Implemented: diagnostic pilot plus a [24-scenario paired study](mbtx-study-protocol.md), reusable-program validation on withheld inputs, isolated Git/sandbox workspaces, hierarchical uncertainty, paced adapter, immutable batches, fault/recovery handling, reports and standard OTLP export/import. The [stage-three record](mbtx-stage-three.md) distinguishes implementation checks from user-operated Linux acceptance. |
-| Code delivery                 | Ship reviewed implementation, scoped tests, fixed replay, fixtures, configuration, and runnable collection guidance. Record any unresolved platform boundary.                                                                                                              |
-| Research acceptance           | After user-run Linux data returns, assess completeness, failure populations, uncertainty, and conclusions. No benefit claim or default switch before evidence.                                                                                                             |
-
-The following decisions are deliberately open. Resolve each with the smallest
-relevant prototype before depending on it:
-
-| Decision                                          | Required evidence                                                                                                                    |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Remaining request observation coverage            | Extend native request observation to WebSocket and auxiliary endpoints before claiming complete request totals for those transports. |
-| Live relay behavior                               | Controlled forwarding, complete-stream serialization and cooldown are tested; validate the configured provider with the Linux pilot. |
-| Sample sizes and task budgets                     | Pilot task difficulty/request cost, then a frozen protocol and analysis plan; no outcome-based selection.                            |
-| Collector deployment and public artifact location | Demonstrate ingestion and standalone reconstruction while keeping credentials out of published data.                                 |
-
-Revisit a settled boundary when requirements or runtime evidence change, and
-record the reason, affected contracts, and migration. Directory placeholders
-are not evidence that these open decisions have already been implemented.
+## Program contract and execution
+
+`mbtx` takes exactly one of `source` or `filename`. Inline source is bounded to
+65,536 UTF-8 bytes. A filename is read through the selected Codex environment,
+and its executed source bytes are snapshotted. `argv` remains literal; `cwd` uses
+the selected environment's filesystem policy. Shared file-edit tools update
+saved programs. There is no persistent language heap between invocations.
+
+The chosen execution target is Wasm with the official `moon` and `moonrun` tools.
+Builds use the frozen dependency cache, release profile and explicit target.
+The runtime can invoke declared native utilities through the MoonBit async API;
+this is part of the documented capability set. It is not presented as a
+MoonBit-only machine-instruction experiment.
+
+The host preserves the sequence policy/approval → sandbox → spawn → wait/reap →
+IO drain → result publication. Cancellation covers preparation and compiler
+work as well as execution. Build and run timeouts are distinct tool outcomes;
+they do not implicitly terminate the agent task. Default build/run limits are
+60/10 seconds, with maximum requested limits of 120/60 seconds. The attempt's
+3,600-second wall limit is controlled separately by the evaluator.
+
+The effective config uses `[mbtx]`: `enabled`, absolute `moon` and `moonrun`,
+`dependency_cache`, and optional `reference_directory` and `output_directory`.
+`observation_socket` is an explicit host-configured permission for one passive
+Unix-domain receipt channel. It enables no TCP access, local listener permission
+or general Unix socket access. Models cannot choose this grant through tool
+arguments. Evaluation config grants the identical channel capability to both
+arms, while external network access from task processes remains disabled.
+
+## Output and resource boundaries
+
+Both arms archive stdout and stderr at the host capture boundary before model
+preview truncation. PTY output is labeled as a combined terminal stream; it is
+not fabricated into separate stdout/stderr observations. Receipts include the
+call, phase, stream, observed byte count, SHA-256, EOF, completeness and write
+cost. An interrupted capture is incomplete. A failed archive write does not
+change the requested program into a setup failure and does not claim complete
+diagnostics. Source snapshots also use registered resources.
+
+`read_resource(resource_id, offset, max_bytes)` exposes only approved general
+references and the current session's registered resources. It does not compile
+MoonBit, accept arbitrary paths, read another attempt or expose the oracle.
+Pages respect UTF-8 boundaries and report the actual range, next offset and EOF.
+Full bytes are preserved for offline export even when the model preview is
+bounded. Both arms use the same Codex token policy, initially 4,096 tokens.
+
+## Cache and build lifecycle
+
+Fixed components are prepared once by `prepare-evaluation.mbtx`. Component
+fingerprints include relevant source, dependency locks, toolchain, platform,
+target and profile. Product hashes are checked before a component is reused.
+Ordinary documentation changes do not invalidate the Codex build. Model-visible
+reference changes do invalidate the treatment bundle. Only approved dependency
+closure is copied; personal caches and credentials are excluded.
+
+Each MBTX session prepares its dependency copy and build directory once. A
+session lock serializes compiler work. Exact compiled artifacts are cached in
+host memory using source and effective build-input identity. Source, dependency,
+toolchain, target, profile, options or relevant working-directory changes
+invalidate reuse. An interrupted preparation cannot publish a partial cache
+entry. Every execution writes a separate artifact and starts a fresh runtime
+process; runtime outputs and mutable program state are never cached.
+
+Cache hits retain the original compiler diagnostics and identify their source
+call. Original build duration is labeled as historical cost; current compilation
+cost is zero for a confirmed hit. Necessary model compilation is part of the
+treatment, while fixed bundle construction is a separate preparation cost.
+
+## Collection and independent verification
+
+The formal schedule is 80 assigned pairs across ten long-task categories,
+separated into 64 workflow pairs and 16 program-delivery pairs. A ten-pair pilot
+uses separate inputs. Adjacent pairs alternate AB/BA; batches balance category
+and complexity. Both arms share immutable fixture inputs and a precomputed Git
+baseline, copied into independently writable workspaces without writable hard
+links. Heavy verification, compression and rendering happen after model work.
+
+One persistent local Responses gate forwards all requests serially. Relay starts
+are at least 15 seconds apart, and the permit lasts through the stream. Probes,
+auxiliary calls and any received transport retries use that gate. A 429 remains
+evidence and delays later requests according to valid Retry-After or a 30-second
+fallback. No successful-sample replacement or latency-based sample selection
+is permitted. The frozen manifest records configuration and collection conditions.
+
+The independent MoonBit oracle checks outputs and authorized state changes.
+Tasks requiring process execution use host receipts from the hash-verified worker
+executable, authenticated by the local peer PID. Delivery programs execute on
+fresh inputs after the original session ends. Successful fallback cleanup or a
+correct artifact cannot overwrite a failed execution/session terminal state.
+
+## Evidence, analysis and report contract
+
+Attempts are allocated exclusively, written append-only and sealed with hashes.
+Resume runs missing assignments; it never rewrites completed or censored
+attempts. Step and request boundaries come from native Codex trace and OTel.
+Started and accepted decisions, tool calls, actual HTTP starts, compilations,
+resource reads and failures remain distinct. Transport retries and auxiliary
+requests are not task decisions. Unknown time, usage or lifecycle values remain
+null. Model-private reasoning is outside the observation boundary.
+
+The Rust adapter may cache sealed-attempt derivations, keyed by raw seals and
+analyzer identity, outside raw attempts. Final generation verifies raw hashes
+before reuse. The cache is disposable; reports can be rebuilt without current
+credentials or environment-dependent task inputs. The progress log tails new
+events rather than repeatedly reducing and resampling all historical attempts.
+
+The shared analysis model drives JSON, CSV, Markdown and standalone HTML.
+Unstarted samples are reported explicitly; failures remain in denominators.
+Conditional paired estimates require two successes and complete step evidence.
+Workflow and delivery are never pooled. Fixed-seed stratified bootstrap samples
+inputs and nested repetitions; repetitions do not become independent tasks.
+
+The HTML includes pinned ECharts 6.0.0, lazy per-attempt compressed data and all
+recorded steps, arguments, model-visible outputs and diagnostics. Untrusted
+content is rendered as text. There is no network dependency or SigNoz deployment.
+Raw HTTP/SSE and binaries remain in the evidence archive; native OTLP and a
+standard trace JSON projection remain available for independent inspection.
+
+## Timing and attribution
+
+Writer-entry monotonic timestamps precede trace serialization and IO. Collector,
+native trace, worker receipts and process elapsed measurements have explicit
+clock domains. Cross-domain timestamps are not directly subtracted. A wait
+observation is not a kernel exit timestamp. Client-observed request intervals
+can include transport and observation backpressure; provider compute and relay
+waiting remain inseparable without server evidence.
+
+Preparation, pacing, tool preparation/cache/build/run, drain, evidence writes and
+post-execution verification have separate observations where available. Spans
+can overlap. The report does not add them to manufacture a complete partition;
+unattributed duration remains unknown. Minimal/full local calibration measures
+the incremental native OTLP cost over required audit capture, not zero-overhead
+execution. Calibration averages are never deducted from online results.
+
+## Validation and evolution
+
+Fast CI checks MoonBit, Rust adapter/runtime contracts and interfaces. Offline
+integration builds one bundle, runs actual Codex fixed responses, validates all
+category/complexity combinations, cache reuse, long decision chains, external
+faults, interruption, immutable resume and report reconstruction. CI exposes one
+aggregate MBTX required status. Real relay collection is a separate user-run
+Linux task; macOS results never stand in for Linux evidence.
+
+Follow repository Cargo/Bazel/schema rules. New automation stays in `.mbtx`.
+Extend lower-level contracts when necessary; do not grow core with benchmark
+logic. Historical implementation records remain available in the stage-one,
+stage-two and stage-three documents. They describe their original evidence;
+current interfaces and research acceptance follow this architecture and the
+long-study protocol. No backend default changes follow without a separate
+evidence-based decision.
