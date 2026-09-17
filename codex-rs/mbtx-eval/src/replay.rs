@@ -108,9 +108,19 @@ pub(crate) fn fixed(task: &Value, arm: &str, prefix_turns: usize) -> Result<Vec<
     };
     // Deliberately prescribed solutions validate transport, tool execution and
     // independent negative oracle tests. They are never research samples.
-    let mut replies=Vec::new();
+    let mut replies = Vec::new();
     for turn in 0..prefix_turns {
-        let (name,args)=if arm=="mbtx_program" {("mbtx",json!({"source":"fn main { println(\"fresh execution 雪\") }"}))} else {("exec_command",json!({"cmd":"printf 'fresh execution 雪\\n'","login":false}))};
+        let (name, args) = if arm == "mbtx_program" {
+            (
+                "mbtx",
+                json!({"source":"fn main { println(\"fresh execution 雪\") }"}),
+            )
+        } else {
+            (
+                "exec_command",
+                json!({"cmd":"printf 'fresh execution 雪\\n'","login":false}),
+            )
+        };
         replies.push(sse(&[
             json!({"type":"function_call","call_id":format!("prefix-{turn}-run"),"name":name,"arguments":args.to_string()}),
             json!({"type":"function_call","call_id":format!("prefix-{turn}-read"),"name":"read_resource","arguments":json!({"resource_id":"reference:moonbit","offset":0,"max_bytes":128}).to_string()}),

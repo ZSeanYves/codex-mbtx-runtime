@@ -348,11 +348,14 @@ impl UnifiedExecProcess {
         sandbox_type: SandboxType,
         spawn_lifecycle: SpawnLifecycleHandle,
     ) -> Result<Self, UnifiedExecError> {
-        Self::from_spawned_observed(spawned, sandbox_type, spawn_lifecycle, Default::default()).await
+        Self::from_spawned_observed(spawned, sandbox_type, spawn_lifecycle, Default::default())
+            .await
     }
 
     pub(super) async fn from_spawned_observed(
-        spawned: SpawnedPty, sandbox_type: SandboxType, spawn_lifecycle: SpawnLifecycleHandle,
+        spawned: SpawnedPty,
+        sandbox_type: SandboxType,
+        spawn_lifecycle: SpawnLifecycleHandle,
         archives: super::output_archive::Archives,
     ) -> Result<Self, UnifiedExecError> {
         let SpawnedPty {
@@ -361,8 +364,10 @@ impl UnifiedExecProcess {
             stderr_rx,
             mut exit_rx,
         } = spawned;
-        let observer = (!archives.0.is_empty()).then(|| Box::new(archives.clone()) as Box<dyn codex_utils_pty::OutputObserver>);
-        let output_rx = codex_utils_pty::combine_output_receivers_observed(stdout_rx, stderr_rx, observer);
+        let observer = (!archives.0.is_empty())
+            .then(|| Box::new(archives.clone()) as Box<dyn codex_utils_pty::OutputObserver>);
+        let output_rx =
+            codex_utils_pty::combine_output_receivers_observed(stdout_rx, stderr_rx, observer);
         let mut managed = Self::new(
             ProcessHandle::Local(Box::new(process_handle)),
             sandbox_type,
@@ -417,7 +422,8 @@ impl UnifiedExecProcess {
     }
 
     pub(super) async fn from_exec_server_started_observed(
-        started: StartedExecProcess, archives: super::output_archive::Archives,
+        started: StartedExecProcess,
+        archives: super::output_archive::Archives,
     ) -> Result<Self, UnifiedExecError> {
         let process_handle = ProcessHandle::ExecServer(Arc::clone(&started.process));
         // Older peers do not report this field. In that case, skip local
@@ -539,7 +545,9 @@ impl UnifiedExecProcess {
                     } = response;
                     let mut recovered_seq = last_seq;
                     for chunk in chunks.into_iter().filter(|chunk| chunk.seq > last_seq) {
-                        if chunk.seq > recovered_seq.saturating_add(1) { archives.gap(); }
+                        if chunk.seq > recovered_seq.saturating_add(1) {
+                            archives.gap();
+                        }
                         recovered_seq = chunk.seq;
                         archives.observe(chunk.stream, &chunk.chunk.0);
                         let bytes = chunk.chunk.into_inner();

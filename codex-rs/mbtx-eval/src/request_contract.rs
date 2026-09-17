@@ -58,7 +58,8 @@ pub(crate) fn validate(body: &Value, arm: &str) -> Result<()> {
                 || (arm == "shell_tool" && name == "write_stdin")
                 || matches!(
                     name,
-                    "read_resource" | "apply_patch"
+                    "read_resource"
+                        | "apply_patch"
                         | "view_image"
                         | "request_user_input"
                         | "get_goal"

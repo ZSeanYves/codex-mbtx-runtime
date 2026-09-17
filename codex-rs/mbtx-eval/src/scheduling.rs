@@ -1,5 +1,6 @@
 //! Prespecified paired schedule; success and elapsed time never select samples.
-use serde_json::{Value, json};
+use serde_json::Value;
+use serde_json::json;
 
 pub(crate) fn schedule(tasks: &[Value], repeats: usize, seed: u64) -> Vec<Value> {
     let mut order: Vec<_> = (0..tasks.len()).collect();
@@ -11,13 +12,21 @@ pub(crate) fn schedule(tasks: &[Value], repeats: usize, seed: u64) -> Vec<Value>
     let long = tasks.iter().all(|t| t["cohort"].is_string());
     if long {
         let mut families = std::collections::BTreeMap::<String, Vec<usize>>::new();
-        for &index in &order { families.entry(tasks[index]["family"].to_string()).or_default().push(index); }
+        for &index in &order {
+            families
+                .entry(tasks[index]["family"].to_string())
+                .or_default()
+                .push(index);
+        }
         // One task per category in each ten-pair block. Alternate complexity
         // orientation across categories, with variants shuffled inside tiers.
         let mut buckets = families.into_values().collect::<Vec<_>>();
         for (i, bucket) in buckets.iter_mut().enumerate() {
             bucket.sort_by_key(|&j| tasks[j]["complexity"].as_str().unwrap_or_default());
-            if !bucket.is_empty() { let shift = (i % 2) * (bucket.len() / 2); bucket.rotate_left(shift); }
+            if !bucket.is_empty() {
+                let shift = (i % 2) * (bucket.len() / 2);
+                bucket.rotate_left(shift);
+            }
         }
         order.clear();
         for round in 0..buckets.iter().map(Vec::len).max().unwrap_or(0) {
@@ -26,7 +35,11 @@ pub(crate) fn schedule(tasks: &[Value], repeats: usize, seed: u64) -> Vec<Value>
                 state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
                 category_order.swap(i, (state % (i as u64 + 1)) as usize);
             }
-            for i in category_order { if let Some(&index) = buckets[i].get(round) { order.push(index); } }
+            for i in category_order {
+                if let Some(&index) = buckets[i].get(round) {
+                    order.push(index);
+                }
+            }
         }
     }
     let mut pairs = Vec::new();

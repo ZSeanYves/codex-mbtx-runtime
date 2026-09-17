@@ -50,14 +50,19 @@ pub(crate) fn export_file(root: &Path, output: &Path, model: &Value) -> Result<(
             spans.push(json!({"traceId":trace_id,"spanId":root_span,"name":"mbtx.attempt","kind":1,"startTimeUnixNano":(start*1_000_000).to_string(),"endTimeUnixNano":(end*1_000_000).to_string(),"attributes":attributes}));
         }
         for bundle in crate::report::directories(&directory.join("trace")).unwrap_or_default() {
-            let Ok(text) = fs::read_to_string(bundle.join("trace.jsonl")) else {continue;};
+            let Ok(text) = fs::read_to_string(bundle.join("trace.jsonl")) else {
+                continue;
+            };
             let events: Vec<Value> = text
                 .lines()
                 .filter_map(|s| serde_json::from_str(s).ok())
                 .collect();
             let mut starts = std::collections::BTreeMap::new();
             for event in events {
-                if let (Some(time),Some(domain)) = (event["monotonic_ns"].as_u64(),event["clock_domain"].as_str()) {
+                if let (Some(time), Some(domain)) = (
+                    event["monotonic_ns"].as_u64(),
+                    event["clock_domain"].as_str(),
+                ) {
                     trace_events.push(json!({"name":event["payload"]["type"],"ph":"i","s":"t","pid":id,"tid":domain,"ts":time as f64/1000.0,"args":{"source_seq":event["seq"],"payload":event["payload"],"confidence":"observed"}}));
                 }
                 let observation = &event["payload"]["observation"];
@@ -67,14 +72,22 @@ pub(crate) fn export_file(root: &Path, output: &Path, model: &Value) -> Result<(
                 if observation["type"] == "finished"
                     && let Some(start) = starts.get(&observation["step_id"].to_string())
                 {
-                    let (Some(begin),Some(end)) = (start["wall_time_unix_ms"].as_u64(),event["wall_time_unix_ms"].as_u64()) else { continue; };
+                    let (Some(begin), Some(end)) = (
+                        start["wall_time_unix_ms"].as_u64(),
+                        event["wall_time_unix_ms"].as_u64(),
+                    ) else {
+                        continue;
+                    };
                     let span = digest(format!("{id}:{}", observation["step_id"]).as_bytes());
                     spans.push(json!({"traceId":trace_id,"spanId":&span[..16],"parentSpanId":root_span,"name":"codex.agent_step","kind":1,"startTimeUnixNano":(begin*1_000_000).to_string(),"endTimeUnixNano":(end*1_000_000).to_string(),"attributes":[attribute("mbtx.step_id",&observation["step_id"]),attribute("mbtx.outcome",&observation["outcome"]),attribute("mbtx.source_seq",&event["seq"]),attribute("mbtx.confidence",&json!("observed"))]}));
                 }
             }
         }
     }
-    json_new(&output.join("trace.json"),&json!({"traceEvents":trace_events,"displayTimeUnit":"ms","metadata":{"clock_rule":"Each thread has its own monotonic epoch. Cross-domain absolute placement is not aligned.","missing_timestamps":"Omitted from the projection, retained in raw events"}}))?;
+    json_new(
+        &output.join("trace.json"),
+        &json!({"traceEvents":trace_events,"displayTimeUnit":"ms","metadata":{"clock_rule":"Each thread has its own monotonic epoch. Cross-domain absolute placement is not aligned.","missing_timestamps":"Omitted from the projection, retained in raw events"}}),
+    )?;
     json_new(
         &output.join("steps.otlp.json"),
         &json!({"resourceSpans":[{"resource":{"attributes":[attribute("service.name",&json!("mbtx-evaluation"))]},"scopeSpans":[{"scope":{"name":"mbtx-native-trace-projection","version":"1"},"spans":spans}]}]}),

@@ -81,7 +81,10 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
     }
     fs::create_dir(pending.join("reference"))?;
     for name in ["moonbit.md", "shell.md", "tools.md", "examples.mbtx"] {
-        fs::copy(repo.join("mbtx/reference").join(name), pending.join("reference").join(name))?;
+        fs::copy(
+            repo.join("mbtx/reference").join(name),
+            pending.join("reference").join(name),
+        )?;
     }
     fs::copy(
         repo.join("mbtx/_build/wasm/release/build/cmd/evaluation-model/evaluation-model.wasm"),
@@ -99,7 +102,9 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
     // async 0.21.3 has no external dependencies. Core ships with the compiler.
     // Expanding this allowlist requires a reviewed dependency-closure change.
     let relative_dependency = "moonbitlang/async/0.21.3";
-    let deps = moon_home.join("cache/deps/v1/sources").join(relative_dependency);
+    let deps = moon_home
+        .join("cache/deps/v1/sources")
+        .join(relative_dependency);
     fs::create_dir_all(pending.join("dependencies"))?;
     // This format marker is required even by --frozen. The runtime lock is not.
     fs::copy(
@@ -118,7 +123,10 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
     {
         let entry = entry?;
         let relative = entry.path().strip_prefix(&deps)?;
-        let destination = pending.join("dependencies/v1/sources").join(relative_dependency).join(relative);
+        let destination = pending
+            .join("dependencies/v1/sources")
+            .join(relative_dependency)
+            .join(relative);
         if entry.file_type().is_dir() {
             fs::create_dir_all(&destination)?;
         } else if entry.file_type().is_file() {

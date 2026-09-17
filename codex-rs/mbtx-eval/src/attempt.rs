@@ -55,35 +55,51 @@ impl Execution<'_> {
             fs::create_dir(work.join(child))?;
         }
         let workspace = work.join("workspace");
-        let template = root.join("fixtures").join(task["id"].as_str().context("task id")?);
-        let prepared = if template.join("baseline.json").exists() { Some(crate::workspace::instantiate(&template,&workspace)?) } else { None };
-        if prepared.is_none() { for path in task["files"].as_object().context("files")?.keys() {
-            let file = workspace.join(safe_relative(path)?);
-            fs::create_dir_all(file.parent().context("parent")?)?;
-            fs::copy(
-                root.join("fixtures")
-                    .join(task["id"].as_str().context("task id")?)
-                    .join(path),
-                &file,
-            )?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
+        let template = root
+            .join("fixtures")
+            .join(task["id"].as_str().context("task id")?);
+        let prepared = if template.join("baseline.json").exists() {
+            Some(crate::workspace::instantiate(&template, &workspace)?)
+        } else {
+            None
+        };
+        if prepared.is_none() {
+            for path in task["files"].as_object().context("files")?.keys() {
+                let file = workspace.join(safe_relative(path)?);
+                fs::create_dir_all(file.parent().context("parent")?)?;
+                fs::copy(
+                    root.join("fixtures")
+                        .join(task["id"].as_str().context("task id")?)
+                        .join(path),
+                    &file,
+                )?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
+                }
             }
-        } }
+        }
         fs::copy(
             bundle.join("fixture-worker"),
             workspace.join("fixture-worker"),
         )?;
-        let workspace_facts = if let Some(facts) = prepared { facts } else { crate::workspace::prepare(
-            &workspace,
-            &work.join("home"),
-            manifest["path"].as_str().context("recorded PATH")?,
-        )
-        .await? };
+        let workspace_facts = if let Some(facts) = prepared {
+            facts
+        } else {
+            crate::workspace::prepare(
+                &workspace,
+                &work.join("home"),
+                manifest["path"].as_str().context("recorded PATH")?,
+            )
+            .await?
+        };
         json_new(&directory.join("workspace.json"), &workspace_facts)?;
-        let receipts = crate::worker_receipts::WorkerReceipts::start(directory, &bundle.join("fixture-worker")).await?;
+        let receipts = crate::worker_receipts::WorkerReceipts::start(
+            directory,
+            &bundle.join("fixture-worker"),
+        )
+        .await?;
         json_new(&work.join("worker-socket.json"), &json!(receipts.socket))?;
         let endpoint = format!("{}/a/{id}/v1", gate.endpoint);
         let instructions = manifest["protocol"]["instructions"]
@@ -114,10 +130,10 @@ impl Execution<'_> {
             },
         )?;
         if manifest["observation"] == "minimal" {
-            let mut value:toml::Value=toml::from_str(&toml)?;
-            value["otel"]["exporter"]="none".into();
-            value["otel"]["trace_exporter"]="none".into();
-            toml=toml::to_string_pretty(&value)?;
+            let mut value: toml::Value = toml::from_str(&toml)?;
+            value["otel"]["exporter"] = "none".into();
+            value["otel"]["trace_exporter"] = "none".into();
+            toml = toml::to_string_pretty(&value)?;
         }
         write_new(&work.join("codex-home/config.toml"), toml.as_bytes())?;
         write_new(&directory.join("effective-config.toml"), toml.as_bytes())?;
@@ -226,7 +242,10 @@ impl Execution<'_> {
             };
             json_new(&directory.join("submission.json"), &validation)?;
         }
-        json_new(&directory.join("postprocess.json"),&json!({"snapshot_ns":snapshot_ns,"submission_validation_ns":if task["acceptance"]=="programs"{Some(validation_started.elapsed().as_nanos() as u64)}else{None},"scope":"after Codex process wait; excluded from attempt_process_ms"}))?;
+        json_new(
+            &directory.join("postprocess.json"),
+            &json!({"snapshot_ns":snapshot_ns,"submission_validation_ns":if task["acceptance"]=="programs"{Some(validation_started.elapsed().as_nanos() as u64)}else{None},"scope":"after Codex process wait; excluded from attempt_process_ms"}),
+        )?;
         seal(directory)?;
         ensure!(
             termination != "cancelled",

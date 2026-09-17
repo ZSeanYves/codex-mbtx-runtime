@@ -122,7 +122,12 @@ impl TraceWriter {
     ) -> Result<RawTraceEvent> {
         // Capture the observed boundary before lock contention, encoding and IO.
         let wall_time_unix_ms = unix_time_ms();
-        let monotonic_ns = self.clock.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+        let monotonic_ns = self
+            .clock
+            .elapsed()
+            .as_nanos()
+            .try_into()
+            .unwrap_or(u64::MAX);
         let mut inner = self.lock_inner();
         let event = RawTraceEvent {
             schema_version: RAW_TRACE_EVENT_SCHEMA_VERSION,

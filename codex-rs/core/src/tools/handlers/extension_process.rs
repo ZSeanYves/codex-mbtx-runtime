@@ -39,18 +39,52 @@ use crate::tools::sandboxing::ToolRuntime;
 pub(super) struct CoreProcessExecutor(pub(super) Weak<ToolInvocation>);
 
 impl ToolProcessExecutor for CoreProcessExecutor {
-    fn archive_program_resource(&self, phase: &'static str, stream: &'static str, bytes: &[u8]) -> Option<codex_tools::output_archive::OutputResource> {
+    fn archive_program_resource(
+        &self,
+        phase: &'static str,
+        stream: &'static str,
+        bytes: &[u8],
+    ) -> Option<codex_tools::output_archive::OutputResource> {
         let invocation = self.0.upgrade()?;
-        let root = invocation.step_context.turn.config.mbtx.output_directory.as_ref()?;
-        let archive = codex_tools::output_archive::OutputArchive::capture(&root.join(invocation.session.thread_id.to_string()), &invocation.call_id, phase, stream);
+        let root = invocation
+            .step_context
+            .turn
+            .config
+            .mbtx
+            .output_directory
+            .as_ref()?;
+        let archive = codex_tools::output_archive::OutputArchive::capture(
+            &root.join(invocation.session.thread_id.to_string()),
+            &invocation.call_id,
+            phase,
+            stream,
+        );
         archive.append(bytes);
         Some(archive.finish())
     }
 
-    fn read_output_resource(&self, id: &str, offset: u64, max_bytes: usize) -> Result<codex_tools::output_archive::ResourcePage, String> {
+    fn read_output_resource(
+        &self,
+        id: &str,
+        offset: u64,
+        max_bytes: usize,
+    ) -> Result<codex_tools::output_archive::ResourcePage, String> {
         let invocation = self.0.upgrade().ok_or("tool invocation has ended")?;
-        let root = invocation.step_context.turn.config.mbtx.output_directory.as_ref().ok_or("output archive is not configured")?;
-        codex_tools::output_archive::read_output(&root.join(invocation.session.thread_id.to_string()), id, offset, max_bytes).map_err(|error| error.to_string())
+        let root = invocation
+            .step_context
+            .turn
+            .config
+            .mbtx
+            .output_directory
+            .as_ref()
+            .ok_or("output archive is not configured")?;
+        codex_tools::output_archive::read_output(
+            &root.join(invocation.session.thread_id.to_string()),
+            id,
+            offset,
+            max_bytes,
+        )
+        .map_err(|error| error.to_string())
     }
 
     fn check_available(&self, environment_id: &str) -> Result<(), String> {
@@ -223,7 +257,15 @@ impl ToolRuntime<ProcessRequest, ToolProcessOutput> for ProcessRuntime {
             args: req.process.command[1..].to_vec(),
             cwd: req.process.cwd.clone(),
             env,
-            managed_network: crate::tools::observed_process::with_observation_socket(None, ctx.step_context.turn.config.mbtx.observation_socket.as_ref()),
+            managed_network: crate::tools::observed_process::with_observation_socket(
+                None,
+                ctx.step_context
+                    .turn
+                    .config
+                    .mbtx
+                    .observation_socket
+                    .as_ref(),
+            ),
             additional_permissions: req.additional_permissions.clone(),
         };
         let options = ExecOptions {
@@ -244,10 +286,20 @@ impl ToolRuntime<ProcessRequest, ToolProcessOutput> for ProcessRuntime {
             )
             .map_err(ToolError::Codex)?;
         let archives = if let Some(root) = &ctx.step_context.turn.config.mbtx.output_directory {
-            ["stdout", "stderr"].into_iter().map(|stream|
-                codex_tools::output_archive::OutputArchive::capture(&root.join(ctx.session.thread_id.to_string()), &ctx.call_id, req.process.phase, stream)
-            ).collect::<Vec<_>>()
-        } else { vec![] };
+            ["stdout", "stderr"]
+                .into_iter()
+                .map(|stream| {
+                    codex_tools::output_archive::OutputArchive::capture(
+                        &root.join(ctx.session.thread_id.to_string()),
+                        &ctx.call_id,
+                        req.process.phase,
+                        stream,
+                    )
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
         execute_bounded_request(exec, req.process.max_output_bytes, archives)
             .await
             .map_err(ToolError::Codex)

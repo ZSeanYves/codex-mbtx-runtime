@@ -1430,7 +1430,13 @@ impl UnifiedExecProcessManager {
         spawn_lifecycle.after_spawn();
         let spawned =
             spawn_result.map_err(|err| UnifiedExecError::create_process(err.to_string()))?;
-        UnifiedExecProcess::from_spawned_observed(spawned, request.sandbox, spawn_lifecycle, archives).await
+        UnifiedExecProcess::from_spawned_observed(
+            spawned,
+            request.sandbox,
+            spawn_lifecycle,
+            archives,
+        )
+        .await
     }
 
     #[tracing::instrument(

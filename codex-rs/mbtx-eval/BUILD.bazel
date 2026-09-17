@@ -2,7 +2,10 @@ load("//:defs.bzl", "codex_rust_crate")
 
 codex_rust_crate(
     name = "mbtx-eval",
+    compile_data = glob([
+        "web/**",
+        "src/snapshots/**",
+    ]),
     crate_name = "codex_mbtx_eval",
     crate_srcs = [],
-    compile_data = glob(["web/**", "src/snapshots/**"]),
 )

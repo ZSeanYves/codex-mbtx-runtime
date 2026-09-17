@@ -22,9 +22,9 @@ use super::RawExecToolCallOutput;
 use super::aggregate_output;
 use super::execute_exec_request_raw;
 use super::stream_capture;
-use codex_tools::output_archive::OutputArchive;
 use crate::sandboxing::ExecRequest;
 use codex_protocol::error::Result;
+use codex_tools::output_archive::OutputArchive;
 
 pub(crate) async fn execute_bounded_request(
     mut request: ExecRequest,
@@ -33,10 +33,14 @@ pub(crate) async fn execute_bounded_request(
 ) -> Result<ToolProcessOutput> {
     request.capture_policy = ExecCapturePolicy::BoundedProcess { max_bytes };
     let started = Instant::now();
-    let raw = stream_capture::ARCHIVES.scope(archives.clone(), execute_exec_request_raw(
-        request, /*stdout_stream*/ None, /*after_spawn*/ None,
-    ))
-    .await?;
+    let raw = stream_capture::ARCHIVES
+        .scope(
+            archives.clone(),
+            execute_exec_request_raw(
+                request, /*stdout_stream*/ None, /*after_spawn*/ None,
+            ),
+        )
+        .await?;
     let duration_ms = started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     #[cfg(unix)]
     let signal = raw.exit_status.signal();
@@ -92,12 +96,18 @@ pub(super) async fn consume(
         .take()
         .ok_or_else(|| io::Error::other("missing stderr pipe"))?;
     let cap = Some(max_bytes.saturating_add(1));
-    let archives = stream_capture::ARCHIVES.try_with(Clone::clone).unwrap_or_default();
+    let archives = stream_capture::ARCHIVES
+        .try_with(Clone::clone)
+        .unwrap_or_default();
     let stdout = AbortOnDropHandle::new(tokio::spawn(stream_capture::read(
-        stdout, max_bytes.saturating_add(1), archives.first().cloned(),
+        stdout,
+        max_bytes.saturating_add(1),
+        archives.first().cloned(),
     )));
     let stderr = AbortOnDropHandle::new(tokio::spawn(stream_capture::read(
-        stderr, max_bytes.saturating_add(1), archives.get(1).cloned(),
+        stderr,
+        max_bytes.saturating_add(1),
+        archives.get(1).cloned(),
     )));
 
     let (exit_status, termination) = tokio::select! {

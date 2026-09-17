@@ -145,13 +145,26 @@ pub(crate) fn instantiate(template: &Path, workspace: &Path) -> Result<Value> {
     for entry in walkdir::WalkDir::new(template).follow_links(false) {
         let entry = entry?;
         let relative = entry.path().strip_prefix(template)?;
-        if relative.as_os_str().is_empty() || relative == Path::new("seal.json") || relative == Path::new("baseline.json") { continue; }
-        ensure!(!entry.file_type().is_symlink(),"symlink in workspace template");
+        if relative.as_os_str().is_empty()
+            || relative == Path::new("seal.json")
+            || relative == Path::new("baseline.json")
+        {
+            continue;
+        }
+        ensure!(
+            !entry.file_type().is_symlink(),
+            "symlink in workspace template"
+        );
         let target = workspace.join(relative);
-        if entry.file_type().is_dir() { fs::create_dir_all(target)?; }
-        else {
-            fs::copy(entry.path(),&target)?;
-            #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; fs::set_permissions(target,fs::Permissions::from_mode(0o644))?; }
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(target)?;
+        } else {
+            fs::copy(entry.path(), &target)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(target, fs::Permissions::from_mode(0o644))?;
+            }
         }
     }
     let mut facts = crate::evidence::read_json(&template.join("baseline.json"))?;

@@ -76,11 +76,7 @@ pub(crate) struct RunArgs {
     pub observation: String,
 }
 
-fn route(
-    directory: PathBuf,
-    arm: &str,
-    replies: Option<Vec<replay::Reply>>,
-) -> Result<Route> {
+fn route(directory: PathBuf, arm: &str, replies: Option<Vec<replay::Reply>>) -> Result<Route> {
     for child in ["http", "otel", "trace"] {
         fs::create_dir(directory.join(child))?;
     }
@@ -104,9 +100,22 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         "pilot collection currently supports Linux and macOS only"
     );
     ensure!(args.batch_pairs != Some(0), "batch-pairs must be positive");
-    ensure!(args.mode=="replay" || args.observation=="full","minimal observation is an offline calibration condition only");
-    ensure!(args.replay_prefix_turns <= 256 && (args.replay_prefix_turns == 0 || (args.mode == "replay" && args.replay_source.is_none() && args.replay_fault.is_none())),"decision prefix is available only for fixed offline replay");
-    ensure!((1..=86400).contains(&args.max_wall_seconds), "max-wall-seconds must be 1..86400");
+    ensure!(
+        args.mode == "replay" || args.observation == "full",
+        "minimal observation is an offline calibration condition only"
+    );
+    ensure!(
+        args.replay_prefix_turns <= 256
+            && (args.replay_prefix_turns == 0
+                || (args.mode == "replay"
+                    && args.replay_source.is_none()
+                    && args.replay_fault.is_none())),
+        "decision prefix is available only for fixed offline replay"
+    );
+    ensure!(
+        (1..=86400).contains(&args.max_wall_seconds),
+        "max-wall-seconds must be 1..86400"
+    );
     ensure!(
         args.mode != "relay" || args.min_interval_ms >= 15000,
         "relay start interval must be at least 15000 ms"
@@ -227,7 +236,8 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                 && previous["mode"] == args.mode
                 && previous["min_interval_ms"] == args.min_interval_ms
                 && previous["max_wall_seconds"] == args.max_wall_seconds
-                && previous["replay_prefix_turns"].as_u64().unwrap_or(0) == args.replay_prefix_turns as u64
+                && previous["replay_prefix_turns"].as_u64().unwrap_or(0)
+                    == args.replay_prefix_turns as u64
                 && previous["observation"].as_str().unwrap_or("full") == args.observation
                 && previous["schedule"] == json!(expected_schedule)
                 && previous["protocol"] == protocol
@@ -257,8 +267,8 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                 fs::create_dir_all(file.parent().context("fixture parent")?)?;
                 write_new(&file, content.as_str().context("fixture text")?.as_bytes())?;
             }
-            let baseline = crate::workspace::prepare(&directory,&directory,&path).await?;
-            json_new(&directory.join("baseline.json"),&baseline)?;
+            let baseline = crate::workspace::prepare(&directory, &directory, &path).await?;
+            json_new(&directory.join("baseline.json"), &baseline)?;
             seal(&directory)?;
         }
         let fixture_seals = crate::evidence::hashes(&args.output.join("fixtures"))?;
@@ -394,7 +404,7 @@ async fn collect_schedule(
             } else if let Some(fault) = &args.replay_fault {
                 Some(vec![replay::fault(fault)])
             } else if args.mode == "replay" {
-                Some(replay::fixed(task, arm,args.replay_prefix_turns)?)
+                Some(replay::fixed(task, arm, args.replay_prefix_turns)?)
             } else {
                 None
             };
@@ -417,8 +427,14 @@ async fn collect_schedule(
             );
             {
                 use std::io::Write;
-                let mut file=fs::OpenOptions::new().create(true).append(true).open(root.join("progress.jsonl"))?;
-                serde_json::to_writer(&mut file,&json!({"attempt_id":id,"pair_id":pair["pair_id"],"arm":arm,"status":assessment["status"],"comparable":assessment["status"]=="success" && assessment["integrity"]==true && assessment["accounting"]["coverage"]["steps"]==true}))?;
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(root.join("progress.jsonl"))?;
+                serde_json::to_writer(
+                    &mut file,
+                    &json!({"attempt_id":id,"pair_id":pair["pair_id"],"arm":arm,"status":assessment["status"],"comparable":assessment["status"]=="success" && assessment["integrity"]==true && assessment["accounting"]["coverage"]["steps"]==true}),
+                )?;
                 file.write_all(b"\n")?;
                 file.sync_all()?;
             }

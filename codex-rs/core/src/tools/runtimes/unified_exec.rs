@@ -413,7 +413,15 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
             }
             None => (env, None, None),
         };
-        let managed_network_context = crate::tools::observed_process::with_observation_socket(managed_network_context, ctx.step_context.turn.config.mbtx.observation_socket.as_ref());
+        let managed_network_context = crate::tools::observed_process::with_observation_socket(
+            managed_network_context,
+            ctx.step_context
+                .turn
+                .config
+                .mbtx
+                .observation_socket
+                .as_ref(),
+        );
         if let Some(snapshot) = shell_snapshot.as_ref() {
             snapshot.restore_fail_open_aliases(
                 &mut env,

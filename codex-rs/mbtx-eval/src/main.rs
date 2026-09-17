@@ -9,17 +9,17 @@ mod evidence;
 mod gate;
 mod http_headers;
 mod observe;
+mod progress;
 mod replay;
 mod report;
-mod request_contract;
-mod submission;
-mod validation_process;
-mod workspace;
-mod scheduling;
-mod worker_receipts;
 mod report_details;
 mod report_html;
-mod progress;
+mod request_contract;
+mod scheduling;
+mod submission;
+mod validation_process;
+mod worker_receipts;
+mod workspace;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -149,7 +149,9 @@ async fn main() -> Result<()> {
                 credentials_file: None,
                 repeats: Some(repeats),
                 batch_pairs: None,
-                max_wall_seconds: manifest["max_wall_seconds"].as_u64().context("recorded wall limit")?,
+                max_wall_seconds: manifest["max_wall_seconds"]
+                    .as_u64()
+                    .context("recorded wall limit")?,
                 seed: manifest["seed"].as_u64().context("seed")?,
                 min_interval_ms: 15000,
                 tasks,
@@ -159,7 +161,10 @@ async fn main() -> Result<()> {
                 replay_source: Some(run.canonicalize()?),
                 replay_fault: None,
                 replay_prefix_turns: 0,
-                observation: manifest["observation"].as_str().unwrap_or("full").to_owned(),
+                observation: manifest["observation"]
+                    .as_str()
+                    .unwrap_or("full")
+                    .to_owned(),
             })
             .await?;
             println!("{}", path.display());
@@ -184,7 +189,7 @@ async fn main() -> Result<()> {
             bundle: _,
             follow,
         } => {
-            progress::log(&run,follow).await?;
+            progress::log(&run, follow).await?;
         }
     }
     Ok(())

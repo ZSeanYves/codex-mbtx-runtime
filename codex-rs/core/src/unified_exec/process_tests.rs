@@ -18,29 +18,59 @@ use tokio::sync::watch;
 
 #[cfg(unix)]
 #[tokio::test]
-async fn local_archive_preserves_split_streams_and_tail_before_preview_merging() -> anyhow::Result<()> {
+async fn local_archive_preserves_split_streams_and_tail_before_preview_merging()
+-> anyhow::Result<()> {
     use codex_tools::output_archive::OutputArchive;
     let directory = tempfile::tempdir()?;
-    let archives = super::output_archive::Archives(["stdout", "stderr"].into_iter()
-        .map(|stream| OutputArchive::create(directory.path(), "call", "shell", stream))
-        .collect::<std::io::Result<Vec<_>>>()?);
+    let archives = super::output_archive::Archives(
+        ["stdout", "stderr"]
+            .into_iter()
+            .map(|stream| OutputArchive::create(directory.path(), "call", "shell", stream))
+            .collect::<std::io::Result<Vec<_>>>()?,
+    );
     let spawned = codex_utils_pty::spawn_pipe_process_no_stdin(
         "/bin/sh", &["-c".into(), "i=0; while [ $i -lt 2000 ]; do printf '雪\\n'; printf 'λ\\n' >&2; i=$((i+1)); done; printf tail >&2".into()],
         directory.path(), &Default::default(), &None, &[],
     ).await?;
-    let process = UnifiedExecProcess::from_spawned_observed(spawned, codex_sandboxing::SandboxType::None,
-        Box::new(super::process::NoopSpawnLifecycle), archives).await?;
+    let process = UnifiedExecProcess::from_spawned_observed(
+        spawned,
+        codex_sandboxing::SandboxType::None,
+        Box::new(super::process::NoopSpawnLifecycle),
+        archives,
+    )
+    .await?;
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             let changed = process.output_handles().output_closed_notify.notified();
-            if process.output_handles().output_closed.load(std::sync::atomic::Ordering::Acquire) { break; }
+            if process
+                .output_handles()
+                .output_closed
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                break;
+            }
             changed.await;
         }
-    }).await?;
+    })
+    .await?;
     let receipts = process.archives.receipts();
     assert!(receipts.iter().all(|r| r.complete && r.eof));
-    assert_eq!(std::fs::read_to_string(directory.path().join(format!("{}.data", receipts[0].resource_id)))?, "雪\n".repeat(2000));
-    assert_eq!(std::fs::read_to_string(directory.path().join(format!("{}.data", receipts[1].resource_id)))?, "λ\n".repeat(2000) + "tail");
+    assert_eq!(
+        std::fs::read_to_string(
+            directory
+                .path()
+                .join(format!("{}.data", receipts[0].resource_id))
+        )?,
+        "雪\n".repeat(2000)
+    );
+    assert_eq!(
+        std::fs::read_to_string(
+            directory
+                .path()
+                .join(format!("{}.data", receipts[1].resource_id))
+        )?,
+        "λ\n".repeat(2000) + "tail"
+    );
     Ok(())
 }
 

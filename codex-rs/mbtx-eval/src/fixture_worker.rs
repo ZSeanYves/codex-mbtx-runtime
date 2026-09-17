@@ -47,12 +47,18 @@ fn run(args: &[String]) -> Result<ExitCode> {
 
 fn main() -> ExitCode {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    let actions = matches!(args.first().map(String::as_str), Some("job" | "recover" | "emit" | "hash"));
+    let actions = matches!(
+        args.first().map(String::as_str),
+        Some("job" | "recover" | "emit" | "hash")
+    );
     let result = (|| -> Result<ExitCode> {
         if actions {
             fixture_actions::receipt("started", &args, None)?;
             let result = fixture_actions::execute(&args);
-            let code = match &result { Ok(Some((_, code))) => *code, _ => 2 };
+            let code = match &result {
+                Ok(Some((_, code))) => *code,
+                _ => 2,
+            };
             fixture_actions::receipt("completed", &args, Some(code))?;
             return Ok(result?.context("invalid worker action")?.0);
         }

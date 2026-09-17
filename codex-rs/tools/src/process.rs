@@ -2,7 +2,8 @@ use std::future::Future;
 use std::pin::Pin;
 
 use codex_utils_path_uri::PathUri;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 /// A bounded direct process request. The host retains all permission authority.
 pub struct ToolProcessRequest {
@@ -47,11 +48,23 @@ pub struct ToolProcessOutput {
 pub trait ToolProcessExecutor: Send + Sync {
     /// Snapshot submitted source or executable bytes outside task-writable paths.
     /// Phase and stream labels are supplied by the trusted extension, not paths.
-    fn archive_program_resource(&self, _phase: &'static str, _stream: &'static str, _bytes: &[u8]) -> Option<crate::output_archive::OutputResource> { None }
+    fn archive_program_resource(
+        &self,
+        _phase: &'static str,
+        _stream: &'static str,
+        _bytes: &[u8],
+    ) -> Option<crate::output_archive::OutputResource> {
+        None
+    }
 
     /// Read a host-registered output from this session only. Implementations
     /// must not accept arbitrary paths or another session's resource IDs.
-    fn read_output_resource(&self, _id: &str, _offset: u64, _max_bytes: usize) -> Result<crate::output_archive::ResourcePage, String> {
+    fn read_output_resource(
+        &self,
+        _id: &str,
+        _offset: u64,
+        _max_bytes: usize,
+    ) -> Result<crate::output_archive::ResourcePage, String> {
         Err("host output resources are unavailable".into())
     }
 

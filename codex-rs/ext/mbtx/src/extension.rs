@@ -21,7 +21,9 @@ impl<C: Send + Sync> ThreadLifecycleContributor<C> for MbtxExtension<C> {
     fn on_thread_start<'a>(&'a self, input: ThreadStartInput<'a, C>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             input.thread_store.insert((self.settings)(input.config));
-            input.thread_store.insert(crate::cache::SessionCache::default());
+            input
+                .thread_store
+                .insert(crate::cache::SessionCache::default());
         })
     }
 }
@@ -47,7 +49,9 @@ impl<C: Send + Sync> ToolContributor for MbtxExtension<C> {
             if config.enabled {
                 tools.push(Arc::new(MbtxTool {
                     config: (*config).clone(),
-                    cache: store.get::<crate::cache::SessionCache>().unwrap_or_default(),
+                    cache: store
+                        .get::<crate::cache::SessionCache>()
+                        .unwrap_or_default(),
                 }));
             }
         }

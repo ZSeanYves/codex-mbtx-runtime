@@ -65,13 +65,28 @@ pub(crate) async fn assess_attempt(
     let sealed = directory.join("seal.json").exists();
     let verified = sealed && verify(directory).unwrap_or(false);
     let cache = if verified && manifest["manifest_integrity"] != false {
-        let key = crate::evidence::digest(&[fs::read(directory.join("seal.json"))?,serde_json::to_vec(&manifest["protocol"])?,analysis.fingerprint.as_bytes().to_vec()].concat());
-        let root = directory.parent().and_then(Path::parent).context("run root")?.join("derived-analysis");
+        let key = crate::evidence::digest(
+            &[
+                fs::read(directory.join("seal.json"))?,
+                serde_json::to_vec(&manifest["protocol"])?,
+                analysis.fingerprint.as_bytes().to_vec(),
+            ]
+            .concat(),
+        );
+        let root = directory
+            .parent()
+            .and_then(Path::parent)
+            .context("run root")?
+            .join("derived-analysis");
         fs::create_dir_all(&root)?;
         Some(root.join(format!("{key}.json")))
-    } else { None };
-    if let Some(path) = &cache && let Ok(cached) = read_json(path)
-        && cached["sha256"] == crate::evidence::digest(&serde_json::to_vec(&cached["analysis"])?) {
+    } else {
+        None
+    };
+    if let Some(path) = &cache
+        && let Ok(cached) = read_json(path)
+        && cached["sha256"] == crate::evidence::digest(&serde_json::to_vec(&cached["analysis"])?)
+    {
         return Ok(cached["analysis"].clone());
     }
     let assignment = read_json(&directory.join("assignment.json")).unwrap_or(Value::Null);
@@ -111,7 +126,9 @@ pub(crate) async fn assess_attempt(
                 Ok(value) => {
                     trace = serde_json::to_value(value)?;
                     tool_results = crate::report_details::tool_results(&bundles[0], &trace)
-                        .as_object().cloned().unwrap_or_default();
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default();
                 }
                 Err(error) => errors.push(format!("native reduction: {error}")),
             }
@@ -137,8 +154,13 @@ pub(crate) async fn assess_attempt(
                 .as_str()
                 .is_some_and(|v| v.starts_with("text/event-stream"));
             let (terminal, response_id) = if sse {
-                fs::read_to_string(request.join("response.body")).ok().map(|body|response_summary(&body)).unwrap_or_default()
-            } else { (None,None) };
+                fs::read_to_string(request.join("response.body"))
+                    .ok()
+                    .map(|body| response_summary(&body))
+                    .unwrap_or_default()
+            } else {
+                (None, None)
+            };
             value["sse_terminal"] = json!(terminal);
             value["response_id"] = json!(response_id);
             value["sse_expected"] = json!(sse);
@@ -157,10 +179,15 @@ pub(crate) async fn assess_attempt(
     let result = analysis
         .query(json!({"op":"attempt","task":task,"facts":facts}))
         .await?;
-    if let Some(path) = cache && !path.exists() {
+    if let Some(path) = cache
+        && !path.exists()
+    {
         // A partial cache file is never accepted: parsing and its own hash must
         // both pass. Raw evidence is still verified before every reuse.
-        json_new(&path,&json!({"sha256":crate::evidence::digest(&serde_json::to_vec(&result)?),"analysis":result}))?;
+        json_new(
+            &path,
+            &json!({"sha256":crate::evidence::digest(&serde_json::to_vec(&result)?),"analysis":result}),
+        )?;
     }
     Ok(result)
 }
@@ -189,7 +216,9 @@ fn cell(value: &Value) -> String {
 }
 
 fn render(model: &Value, format: &str) -> Result<String> {
-    if format == "html" { return crate::report_html::render(model); }
+    if format == "html" {
+        return crate::report_html::render(model);
+    }
     if format == "json" {
         return Ok(serde_json::to_string_pretty(model)?);
     }
@@ -239,15 +268,41 @@ fn render(model: &Value, format: &str) -> Result<String> {
             cell(&a["cohort"]),
             cell(&a["complexity"]),
             cell(&a["pair_id"]),
-            cell(&model["pairs"].as_array().into_iter().flatten().find(|p|p["pair_id"]==a["pair_id"]).unwrap_or(&Value::Null)["repeat"]),
+            cell(
+                &model["pairs"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|p| p["pair_id"] == a["pair_id"])
+                    .unwrap_or(&Value::Null)["repeat"],
+            ),
             cell(&a["steps_to_success"]),
         ]);
     }
     for pair in model["pairs"].as_array().into_iter().flatten() {
-        for arm in ["shell_tool","mbtx_program"] {
-            if model["attempts"].as_array().into_iter().flatten().any(|a|a["pair_id"]==pair["pair_id"]&&a["arm"]==arm){continue;}
-            let mut row=vec!["null".to_owned();rows[0].len()];
-            for (index,value) in [(0,cell(&pair["task_id"])),(1,cell(&pair["scenario"])),(2,cell(&pair["variant"])),(3,arm.into()),(4,"not_started".into()),(17,cell(&pair["cohort"])),(18,cell(&pair["complexity"])),(19,cell(&pair["pair_id"])),(20,cell(&pair["repeat"]))]{row[index]=value;}
+        for arm in ["shell_tool", "mbtx_program"] {
+            if model["attempts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|a| a["pair_id"] == pair["pair_id"] && a["arm"] == arm)
+            {
+                continue;
+            }
+            let mut row = vec!["null".to_owned(); rows[0].len()];
+            for (index, value) in [
+                (0, cell(&pair["task_id"])),
+                (1, cell(&pair["scenario"])),
+                (2, cell(&pair["variant"])),
+                (3, arm.into()),
+                (4, "not_started".into()),
+                (17, cell(&pair["cohort"])),
+                (18, cell(&pair["complexity"])),
+                (19, cell(&pair["pair_id"])),
+                (20, cell(&pair["repeat"])),
+            ] {
+                row[index] = value;
+            }
             rows.push(row);
         }
     }
@@ -311,10 +366,20 @@ fn render(model: &Value, format: &str) -> Result<String> {
         ));
     }
     if format == "md" {
-        let mut cohorts=String::from("| Cohort | Comparable pairs | Mean step difference | 95% interval | Mean step ratio | Ratio 95% interval |\n|---|---:|---:|---|---:|---|\n");
-        for group in model["by_cohort"].as_array().into_iter().flatten(){
-            let e=&group["conditional"];
-            cohorts.push_str(&format!("| {} | {} | {} | {} | {} | {} |\n",cell(&group["name"]),e["pairs"],e["mean_step_difference"],e["confidence_interval"],e["mean_step_ratio"],e["ratio_confidence_interval"]));
+        let mut cohorts = String::from(
+            "| Cohort | Comparable pairs | Mean step difference | 95% interval | Mean step ratio | Ratio 95% interval |\n|---|---:|---:|---|---:|---|\n",
+        );
+        for group in model["by_cohort"].as_array().into_iter().flatten() {
+            let e = &group["conditional"];
+            cohorts.push_str(&format!(
+                "| {} | {} | {} | {} | {} | {} |\n",
+                cell(&group["name"]),
+                e["pairs"],
+                e["mean_step_difference"],
+                e["confidence_interval"],
+                e["mean_step_ratio"],
+                e["ratio_confidence_interval"]
+            ));
         }
         let table = rows
             .iter()
@@ -366,7 +431,9 @@ pub(crate) async fn generate(
         .await?;
     model["method"] = json!({"manifest":manifest,"analyzer_bundle":read_json(&bundle.join("bundle.json"))?,"rendering":"ECharts 6.0.0; all data and assets embedded; no network requests"});
     for attempt in model["attempts"].as_array_mut().context("attempts")? {
-        let directory = root.join("attempts").join(crate::evidence::safe_relative(attempt["attempt_id"].as_str().context("attempt id")?)?);
+        let directory = root.join("attempts").join(crate::evidence::safe_relative(
+            attempt["attempt_id"].as_str().context("attempt id")?,
+        )?);
         attempt["details"] = crate::report_details::collect(&directory)?;
     }
     let analysis_ns = generation_started.elapsed().as_nanos();
@@ -390,7 +457,10 @@ pub(crate) async fn generate(
         )?;
     }
     crate::observe::export_file(root, &output, &model)?;
-    json_new(&output.join("generation.json"), &json!({"analysis_and_evidence_read_ns":analysis_ns,"render_write_and_trace_export_ns":generation_started.elapsed().as_nanos()-analysis_ns,"scope":"post-execution report preparation; excludes final report seal; not included in attempt measurements"}))?;
+    json_new(
+        &output.join("generation.json"),
+        &json!({"analysis_and_evidence_read_ns":analysis_ns,"render_write_and_trace_export_ns":generation_started.elapsed().as_nanos()-analysis_ns,"scope":"post-execution report preparation; excludes final report seal; not included in attempt measurements"}),
+    )?;
     crate::evidence::seal(&output)?;
     eprintln!("[eval] report: {}", output.display());
     Ok(output)

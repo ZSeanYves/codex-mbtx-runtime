@@ -1,8 +1,8 @@
 //! Per-thread compilation state. Cached Wasm bytes live in host memory, never
 //! in task-writable files. Each execution gets its own fresh artifact copy.
-use std::collections::HashMap;
 use codex_tools::ToolProcessOutput;
 use codex_utils_path_uri::PathUri;
+use std::collections::HashMap;
 use tokio::sync::Mutex;
 
 #[derive(Default)]
@@ -28,13 +28,16 @@ pub(crate) fn inputs(
     roots: &[std::path::PathBuf],
     memo: &mut HashMap<std::path::PathBuf, (Stamp, String)>,
 ) -> std::io::Result<String> {
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
     let mut pending = roots.to_vec();
     let mut files = Vec::new();
     let mut visited = std::collections::HashSet::new();
     while let Some(path) = pending.pop() {
         let canonical = std::fs::canonicalize(&path)?;
-        if !visited.insert(canonical) { continue; }
+        if !visited.insert(canonical) {
+            continue;
+        }
         let metadata = std::fs::metadata(&path)?;
         if metadata.is_dir() {
             for entry in std::fs::read_dir(path)? {
@@ -43,17 +46,30 @@ pub(crate) fn inputs(
                     pending.push(entry.path());
                 }
             }
-        } else if metadata.is_file() { files.push((path, metadata)); }
+        } else if metadata.is_file() {
+            files.push((path, metadata));
+        }
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
     let mut digest = Sha256::new();
     for (path, metadata) in files {
-        let stamp = Stamp { bytes: metadata.len(), modified: metadata.modified()?,
+        let stamp = Stamp {
+            bytes: metadata.len(),
+            modified: metadata.modified()?,
             #[cfg(unix)]
-            changed: { use std::os::unix::fs::MetadataExt; (metadata.ctime(), metadata.ctime_nsec()) },
+            changed: {
+                use std::os::unix::fs::MetadataExt;
+                (metadata.ctime(), metadata.ctime_nsec())
+            },
         };
         if !memo.get(&path).is_some_and(|(old, _)| *old == stamp) {
-            memo.insert(path.clone(), (stamp, format!("{:x}", Sha256::digest(std::fs::read(&path)?))));
+            memo.insert(
+                path.clone(),
+                (
+                    stamp,
+                    format!("{:x}", Sha256::digest(std::fs::read(&path)?)),
+                ),
+            );
         }
         digest.update(path.to_string_lossy().as_bytes());
         digest.update([0]);

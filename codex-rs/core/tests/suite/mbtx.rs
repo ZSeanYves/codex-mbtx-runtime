@@ -31,7 +31,8 @@ const CAPABILITIES: &str = include_str!("../../../../mbtx/fixtures/capabilities.
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires MoonBit and cached async 0.21.3"]
-async fn filename_reuses_compilation_but_executes_fresh_and_source_changes_invalidate() -> Result<()> {
+async fn filename_reuses_compilation_but_executes_fresh_and_source_changes_invalidate() -> Result<()>
+{
     let server = responses::start_mock_server().await;
     let test = configured(&server).await?;
     let source = "fn main { println(\"original 雪\") }";
@@ -40,22 +41,40 @@ async fn filename_reuses_compilation_but_executes_fresh_and_source_changes_inval
     for (id, args) in [
         ("first", json!({"source":source})),
         ("again", json!({"filename":"saved.mbtx"})),
-        ("changed", json!({"source":"fn main { println(\"changed λ\") }"})),
+        (
+            "changed",
+            json!({"source":"fn main { println(\"changed λ\") }"}),
+        ),
     ] {
-        replies.push(responses::sse(vec![responses::ev_response_created(id),
-            responses::ev_function_call(id, "mbtx", &args.to_string()), responses::ev_completed(id)]));
+        replies.push(responses::sse(vec![
+            responses::ev_response_created(id),
+            responses::ev_function_call(id, "mbtx", &args.to_string()),
+            responses::ev_completed(id),
+        ]));
     }
-    replies.push(responses::sse(vec![responses::ev_response_created("final"),
-        responses::ev_assistant_message("answer", "done"), responses::ev_completed("final")]));
+    replies.push(responses::sse(vec![
+        responses::ev_response_created("final"),
+        responses::ev_assistant_message("answer", "done"),
+        responses::ev_completed("final"),
+    ]));
     let mock = responses::mount_sse_sequence(&server, replies).await;
-    test.submit_turn("Execute each supplied program, then finish").await?;
+    test.submit_turn("Execute each supplied program, then finish")
+        .await?;
     let last = mock.last_request().context("final request")?;
     let mut results = Vec::new();
     for id in ["first", "again", "changed"] {
-        let (text, _) = last.function_call_output_content_and_success(id).context("tool result")?;
-        results.push(serde_json::from_str::<Value>(&text.context("JSON result")?)?);
+        let (text, _) = last
+            .function_call_output_content_and_success(id)
+            .context("tool result")?;
+        results.push(serde_json::from_str::<Value>(
+            &text.context("JSON result")?,
+        )?);
     }
-    assert_eq!(results.iter().map(|r| &r["status"]).collect::<Vec<_>>(), vec![&json!("success"); 3], "{results:#?}");
+    assert_eq!(
+        results.iter().map(|r| &r["status"]).collect::<Vec<_>>(),
+        vec![&json!("success"); 3],
+        "{results:#?}"
+    );
     assert_eq!(results[1]["cache"], "hit", "{results:#?}");
     assert_eq!(results[1]["build_reused_from"], "first");
     assert_eq!(results[1]["run"]["stdout"], "original 雪\n");
@@ -65,10 +84,20 @@ async fn filename_reuses_compilation_but_executes_fresh_and_source_changes_inval
     for result in &results {
         assert_eq!(result["source_resource"]["complete"], true);
         assert_eq!(result["artifact_resource"]["complete"], true);
-        assert!(result["artifact_resource"]["bytes"].as_u64().is_some_and(|bytes|bytes>0));
+        assert!(
+            result["artifact_resource"]["bytes"]
+                .as_u64()
+                .is_some_and(|bytes| bytes > 0)
+        );
     }
-    assert_eq!(results[0]["artifact_resource"]["sha256"], results[1]["artifact_resource"]["sha256"]);
-    assert_ne!(results[0]["artifact_resource"]["resource_id"], results[1]["artifact_resource"]["resource_id"]);
+    assert_eq!(
+        results[0]["artifact_resource"]["sha256"],
+        results[1]["artifact_resource"]["sha256"]
+    );
+    assert_ne!(
+        results[0]["artifact_resource"]["resource_id"],
+        results[1]["artifact_resource"]["resource_id"]
+    );
     Ok(())
 }
 
@@ -101,7 +130,12 @@ async fn configured(server: &MockServer) -> Result<TestCodex> {
         .with_extensions(Arc::new(extensions.build()))
         .with_config(move |config| {
             config.mbtx = settings;
-            config.mbtx.output_directory = Some(AbsolutePathBuf::from_absolute_path(config.codex_home.join("test-output-resources")).expect("absolute capture path"));
+            config.mbtx.output_directory = Some(
+                AbsolutePathBuf::from_absolute_path(
+                    config.codex_home.join("test-output-resources"),
+                )
+                .expect("absolute capture path"),
+            );
             config
                 .permissions
                 .shell_environment_policy

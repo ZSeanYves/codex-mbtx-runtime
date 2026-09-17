@@ -52,10 +52,12 @@ impl Validator<'_> {
         let mut command = Command::new(self.bundle.join("codex"));
         command.arg("sandbox");
         if work.join("worker-socket.json").exists() {
-            let socket: String = serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
+            let socket: String =
+                serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
             command.arg("--allow-unix-socket").arg(socket);
         }
-        command.args(["--permission-profile", "evaluation", "-C"])
+        command
+            .args(["--permission-profile", "evaluation", "-C"])
             .arg(work.join("workspace"))
             .arg("--")
             .arg(work.join("workspace/fixture-worker"))
@@ -74,7 +76,8 @@ impl Validator<'_> {
             .env("MOON_BUILD_CACHE", work.join("workspace/build-cache"));
         crate::workspace::git_environment(&mut command, &work.join("workspace"));
         if work.join("worker-socket.json").exists() {
-            let socket: String = serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
+            let socket: String =
+                serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
             command.env("MBTX_WORKER_SOCKET", socket);
         }
         Ok(command)
@@ -222,8 +225,15 @@ impl Validator<'_> {
                 &case_evidence.join("workspace.json"),
                 &crate::workspace::prepare(&workspace, &case_work.join("home"), self.path).await?,
             )?;
-            let receipts = crate::worker_receipts::WorkerReceipts::start(&case_evidence, &self.bundle.join("fixture-worker")).await?;
-            json_new(&case_work.join("worker-socket.json"), &json!(receipts.socket))?;
+            let receipts = crate::worker_receipts::WorkerReceipts::start(
+                &case_evidence,
+                &self.bundle.join("fixture-worker"),
+            )
+            .await?;
+            json_new(
+                &case_work.join("worker-socket.json"),
+                &json!(receipts.socket),
+            )?;
             let mut command = self.command(
                 &case_work,
                 if arm == "mbtx_program" {

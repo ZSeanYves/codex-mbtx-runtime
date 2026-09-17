@@ -536,7 +536,17 @@ impl ExecCommandToolOutput {
 
         sections.push("Output:".to_string());
         if !self.output_resources.is_empty() {
-            sections.insert(sections.len() - 1, format!("Full output resources (read_resource): {}", self.output_resources.iter().map(|r| format!("{}={}", r.stream, r.resource_id)).collect::<Vec<_>>().join(", ")));
+            sections.insert(
+                sections.len() - 1,
+                format!(
+                    "Full output resources (read_resource): {}",
+                    self.output_resources
+                        .iter()
+                        .map(|r| format!("{}={}", r.stream, r.resource_id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            );
         }
         sections.join("\n")
     }
