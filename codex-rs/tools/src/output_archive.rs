@@ -86,7 +86,7 @@ impl OutputArchive {
 
     pub fn append(&self, bytes: &[u8]) {
         let started = Instant::now();
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.sealed { return; }
         state.receipt.bytes += bytes.len() as u64;
         state.hash.update(bytes);
@@ -98,7 +98,7 @@ impl OutputArchive {
 
     /// Observation failures do not terminate or change the child process.
     pub fn record_error(&self, error: &str) {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !state.sealed { state.receipt.error.get_or_insert_with(|| error.into()); }
     }
 
@@ -107,7 +107,7 @@ impl OutputArchive {
     }
 
     pub fn receipt(&self) -> OutputResource {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).receipt.clone()
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).receipt.clone()
     }
 
     pub fn interrupted(&self) -> OutputResource {
@@ -116,7 +116,7 @@ impl OutputArchive {
 
     fn close(&self, eof: bool) -> OutputResource {
         let observed_end = unix_ms();
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !state.sealed {
             let started = Instant::now();
             if let Some(file) = state.file.as_ref() && let Err(error) = file.sync_data() {

@@ -85,6 +85,10 @@ fn native(path: &PathUri) -> Result<String, String> {
         .ok_or_else(|| "non-UTF-8 paths are unsupported by mbtx".into())
 }
 
+#[expect(
+    clippy::await_holding_invalid_type,
+    reason = "preparation and compilation share one serial MoonBit build directory; release before program execution"
+)]
 pub(crate) async fn execute(
     config: &MbtxConfig,
     cache: &SessionCache,
@@ -233,7 +237,7 @@ pub(crate) async fn execute(
                 if binary.exists() { input_roots.push(binary); }
             }
             let lib = root.join("lib");
-            if lib.exists() { input_roots.push(lib.to_path_buf()); }
+            if lib.exists() { input_roots.push(lib); }
         }
         let inputs = crate::cache::inputs(&input_roots, &mut state.fingerprints).map_err(|e| e.to_string())?;
         let key = format!("{:x}", Sha256::digest(serde_json::to_vec(&(
