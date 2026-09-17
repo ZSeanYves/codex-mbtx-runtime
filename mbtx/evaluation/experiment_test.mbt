@@ -32,13 +32,32 @@ test "oracle rejects a plausible wrong answer and modified inputs" {
 
 ///|
 test "worker observation failure is a harness failure even if final artifacts match" {
-  let task : Json = {"id":"t","files":{},"output":"result.json","expected":42}
+  let task : Json = {
+    "id": "t",
+    "files": {},
+    "output": "result.json",
+    "expected": 42,
+  }
   let report = @evaluation.analyze_attempt(task, {
-    "trace":Json::null(),"integrity":true,"exchanges":[],
-    "outcome":{"termination":"exited","exit_code":0},
-    "snapshot":{"files":{"result.json":"42"},"errors":[],"worker_events":[{"evidence_error":"recorder IO failure"}]},
+    "trace": Json::null(),
+    "integrity": true,
+    "exchanges": [],
+    "outcome": { "termination": "exited", "exit_code": 0 },
+    "snapshot": {
+      "files": { "result.json": "42" },
+      "errors": [],
+      "worker_events": [{ "evidence_error": "recorder IO failure" }],
+    },
   })
-  guard report is {"status":String("harness_error"),"oracle":{"success":True,..},"steps_to_success":Null,..} else {fail(report.stringify())}
+  guard report
+    is {
+      "status": String("harness_error"),
+      "oracle": { "success": True, .. },
+      "steps_to_success": Null,
+      ..
+    } else {
+    fail(report.stringify())
+  }
 }
 
 ///|
@@ -125,18 +144,33 @@ test "scheduled but unfinished arms remain in ITT" {
 
 ///|
 test "wall interruption retains a correct artifact without claiming completed steps" {
-  let task : Json = { "id": "long", "files": {}, "output": "result.json", "expected": 42 }
+  let task : Json = {
+    "id": "long",
+    "files": {},
+    "output": "result.json",
+    "expected": 42,
+  }
   let result = @evaluation.analyze_attempt(task, {
-    "attempt_id": "a", "pair_id": "p", "arm": "mbtx_program",
-    "integrity": true, "trace": Json::null(),
+    "attempt_id": "a",
+    "pair_id": "p",
+    "arm": "mbtx_program",
+    "integrity": true,
+    "trace": Json::null(),
     "snapshot": { "files": { "result.json": "42" }, "errors": [] },
     "outcome": { "termination": "wall_limit", "exit_code": 1 },
-    "exchanges": [], "evidence": {},
+    "exchanges": [],
+    "evidence": {},
   })
-  guard result is {
-    "status": String("censored"), "termination_reason": String("wall_limit"),
-    "steps_to_success": Null, "oracle": { "success": True, .. }, ..
-  } else { fail(result.stringify()) }
+  guard result
+    is {
+      "status": String("censored"),
+      "termination_reason": String("wall_limit"),
+      "steps_to_success": Null,
+      "oracle": { "success": True, .. },
+      ..
+    } else {
+    fail(result.stringify())
+  }
 }
 
 ///|

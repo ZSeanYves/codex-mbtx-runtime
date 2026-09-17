@@ -18,10 +18,13 @@ fn tool_outcomes(trace : Json, results : Json, complete~ : Bool) -> Json {
   let mut compilations = 0
   for id, tool in tools {
     let kind = field(tool, "kind")
-    if field(kind,"name") == Json::string("read_resource") {
+    if field(kind, "name") == Json::string("read_resource") {
       resource_reads += 1
-      let arguments = field(field(results,id),"arguments")
-      if field(arguments,"resource_id") is String(id) && id.has_prefix("reference:") { reference_reads += 1 }
+      let arguments = field(field(results, id), "arguments")
+      if field(arguments, "resource_id") is String(id) &&
+        id.has_prefix("reference:") {
+        reference_reads += 1
+      }
     }
     if field(kind, "type") == Json::string("apply_patch") {
       edits += 1
@@ -31,8 +34,11 @@ fn tool_outcomes(trace : Json, results : Json, complete~ : Bool) -> Json {
     }
     mbtx_calls += 1
     let output = field(field(results, id), "output")
-    if field(output,"cache") == Json::string("hit") { cache_hits += 1 }
-    else if field(output,"build") != Json::null() { compilations += 1 }
+    if field(output, "cache") == Json::string("hit") {
+      cache_hits += 1
+    } else if field(output, "build") != Json::null() {
+      compilations += 1
+    }
     match (field(output, "status"), field(output, "stage")) {
       (String("success"), String("completed")) => completed += 1
       (String("error"), String("compilation")) => compile_failed += 1

@@ -79,7 +79,9 @@ fn study_estimate(pairs : Array[Json]) -> Json raise {
   }
   let groups : Map[String, Array[Json]] = Map([])
   for pair in comparable {
-    let key = field(pair, "family").stringify() + "/" + field(pair,"complexity").stringify()
+    let key = field(pair, "family").stringify() +
+      "/" +
+      field(pair, "complexity").stringify()
     let items = groups
       .get(key)
       .unwrap_or_else(() => {
@@ -111,11 +113,15 @@ fn study_estimate(pairs : Array[Json]) -> Json raise {
   for pair in comparable {
     observed_inputs[field(pair, "task_id").stringify()] = true
   }
-  let enough = groups.values().all(samples=>{
-    let inputs : Map[String,Bool] = Map([])
-    for sample in samples { inputs[field(sample,"task_id").stringify()]=true }
-    inputs.length()>=2
-  })
+  let enough = groups
+    .values()
+    .all(samples => {
+      let inputs : Map[String, Bool] = Map([])
+      for sample in samples {
+        inputs[field(sample, "task_id").stringify()] = true
+      }
+      inputs.length() >= 2
+    })
   {
     "pairs": comparable.length().to_json(),
     "observed_input_variants": observed_inputs.length().to_json(),
@@ -139,15 +145,23 @@ fn study_estimate(pairs : Array[Json]) -> Json raise {
 
 ///|
 fn study_uncertainty(pairs : Array[Json]) -> Json raise {
-  let result = match study_estimate(pairs) { Object(v) => v; _ => abort("estimate") }
-  let ratios = pairs.map(p=>{
-    let copy = match p { Object(v)=>v.copy(); _=>Map([]) }
-    copy["step_difference_mbtx_minus_shell"] = field(p,"step_ratio_mbtx_over_shell")
+  let result = match study_estimate(pairs) {
+    Object(v) => v
+    _ => abort("estimate")
+  }
+  let ratios = pairs.map(p => {
+    let copy = match p {
+      Object(v) => v.copy()
+      _ => Map([])
+    }
+    copy["step_difference_mbtx_minus_shell"] = field(
+      p, "step_ratio_mbtx_over_shell",
+    )
     Json::object(copy)
   })
   let ratio = study_estimate(ratios)
-  result["mean_step_ratio"] = field(ratio,"mean_step_difference")
-  result["ratio_confidence_interval"] = field(ratio,"confidence_interval")
+  result["mean_step_ratio"] = field(ratio, "mean_step_difference")
+  result["ratio_confidence_interval"] = field(ratio, "confidence_interval")
   result["ratio_definition"] = "MBTX accepted steps / Shell accepted steps; ratios below 1 favor MBTX, conditional on both successes"
   Json::object(result)
 }
@@ -157,7 +171,7 @@ fn study_strata(
   pairs : Array[Json],
   attempts : Array[Json],
   key : String,
-  intervals~ : Bool = true,
+  intervals? : Bool = true,
 ) -> Json raise {
   let labels : Map[String, Bool] = Map([])
   for pair in pairs {
@@ -191,7 +205,9 @@ fn study_strata(
         .to_json(),
       }
     }
-    let estimate : Map[String,Json] = @json.from_json(study_uncertainty(selected))
+    let estimate : Map[String, Json] = @json.from_json(
+      study_uncertainty(selected),
+    )
     if !intervals {
       estimate["confidence_interval"] = Json::null()
       estimate["ratio_confidence_interval"] = Json::null()

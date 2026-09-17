@@ -49,10 +49,7 @@ pub fn pilot_protocol() -> Json {
     "arms": ["shell_tool", "mbtx_program"],
     "seed": 20260916,
     "repeats": 1,
-    "budgets": {
-      "wall_seconds": 3600,
-      "tool_output_tokens": 4096,
-    },
+    "budgets": { "wall_seconds": 3600, "tool_output_tokens": 4096 },
     "pacing": {
       "concurrency": 1,
       "min_interval_ms": 15000,
@@ -158,9 +155,15 @@ pub fn task_oracle(task : Json, snapshot : Json) -> Json raise {
     }
   }
   let files = object_field(snapshot, "files")
-  let mutable_inputs : Array[Json] = @json.from_json(field(task,"mutable_inputs")) catch { _ => [] }
+  let mutable_inputs : Array[Json] = @json.from_json(
+    field(task, "mutable_inputs"),
+  ) catch {
+    _ => []
+  }
   for path, content in object_field(task, "files") {
-    if path != output && !mutable_inputs.contains(path.to_json()) && files.get(path) != Some(content) {
+    if path != output &&
+      !mutable_inputs.contains(path.to_json()) &&
+      files.get(path) != Some(content) {
       return {
         "success": false,
         "reason": "An input file was modified or removed",
@@ -172,7 +175,8 @@ pub fn task_oracle(task : Json, snapshot : Json) -> Json raise {
     Some(String(content)) => @json.parse(content) catch { _ => Json::null() }
     _ => Json::null()
   }
-  if parsed == field(task,"expected") && field(task,"expected_outputs") != Json::null() {
+  if parsed == field(task, "expected") &&
+    field(task, "expected_outputs") != Json::null() {
     return long_oracle(task, snapshot)
   }
   {
