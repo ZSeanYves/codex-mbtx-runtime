@@ -4,4 +4,5 @@ codex_rust_crate(
     name = "mbtx-eval",
     crate_name = "codex_mbtx_eval",
     crate_srcs = [],
+    compile_data = glob(["web/**", "src/snapshots/**"]),
 )
