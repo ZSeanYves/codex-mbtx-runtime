@@ -24,6 +24,36 @@ fn long_oracle(task : Json, snapshot : Json) -> Json raise {
       return {"success":Json::null(),"reason":"Worker observation failed","confidence":"unknown"}
     }
     let completed = records.filter(r=>field(field(r,"event"),"phase") == Json::string("completed") && field(r,"confidence") == Json::string("observed"))
+    if required.any(e=>field(e,"action") == Json::string("job")) {
+      let plan = @json.parse(string_field(field(task,"files"),"jobs.json"))
+      let jobs : Array[Json] = @json.from_json(field(plan,"jobs"))
+      let done : Map[String,Bool] = Map([])
+      let retried : Map[String,Bool] = Map([])
+      let ready : Map[String,Bool] = Map([])
+      for record in records {
+        if field(record,"confidence") != Json::string("observed") {continue}
+        let event=field(record,"event")
+        if field(event,"action") != Json::string("job") {continue}
+        let id=string_field(event,"id")
+        let key=field(record,"pid").stringify()+"/"+id
+        let row=jobs.iter().find_first(job=>field(job,"id")==id.to_json())
+        if field(event,"phase")==Json::string("started") {
+          if row is Some(row) {
+            if field(row,"enabled")==false.to_json() {return {"success":false,"reason":"A disabled job was executed","confidence":"observed"}}
+            let deps : Array[String] = @json.from_json(field(row,"deps"))
+            ready[key]=deps.all(dep=>done.get(dep).unwrap_or(false))
+          }
+        } else if field(event,"phase")==Json::string("completed") {
+          if field(event,"exit_code")== (7).to_json() {retried[id]=true}
+          if field(event,"exit_code")== (0).to_json() {
+            guard ready.get(key) is Some(ordered) else {return {"success":Json::null(),"reason":"Successful job lacks a matching start receipt","confidence":"unknown"}}
+            if !ordered {return {"success":false,"reason":"Job succeeded before its dependencies were observed complete","confidence":"observed"}}
+            if row is Some(row) && field(row,"fail_once")==true.to_json() && !retried.get(id).unwrap_or(false) {return {"success":false,"reason":"Retryable job succeeded without its required prior failure","confidence":"observed"}}
+            done[id]=true
+          }
+        }
+      }
+    }
     for event in required {
       if !completed.any(r=>{
         let actual = field(r,"event")
