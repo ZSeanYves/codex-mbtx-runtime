@@ -1,5 +1,10 @@
 # Programmable execution study
 
+This is a historical protocol. Its inputs and results must not be pooled with
+[programmable-long-study-v1](mbtx-long-study.md), the current protocol and command
+reference. Step budgets below describe the earlier condition, not the current
+collector.
+
 This protocol extends the eight-task pilot into a paired study of configured
 Codex execution interfaces. It measures successful program delivery and model
 decision rounds. It does not measure CPU instructions, prove that Shell cannot
@@ -216,7 +221,7 @@ is excluded from agent-step and Codex elapsed measurements. Its process elapsed
 values include the sandbox/capture boundary and are not launcher benchmarks.
 All measured comparisons remain conditional on the recorded observation setup;
 there is no claim of zero measurement perturbation. Inspect detailed trajectories
-using the existing [SigNoz import workflow](mbtx-stage-three.md#reports-and-observability).
+using the complete offline HTML described in the [current protocol](mbtx-long-study.md#reading-the-report).
 
 Historical pilot data, including the observed 43-versus-35 step result, remains
 unchanged and separate from this protocol. Formal conclusions follow new data.

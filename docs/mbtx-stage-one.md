@@ -311,5 +311,6 @@ been activated.
 
 Local macOS validation and the user-supplied Linux validation above support the
 bounded stage-one implementation on those tested platforms. Step accounting,
-evaluator activation, live relay collection, SigNoz ingestion and research
-reports remain later stages.
+evaluator activation, live relay collection, observability and research reports
+were later stages at that boundary. See the [current protocol](mbtx-long-study.md)
+for the implemented collector and offline report contract.

@@ -128,7 +128,8 @@ assertions and evaluator comparisons passing, every new bundle reduces, and
 the raw bundle can be replayed a second time without changing bytes or counts.
 This establishes trustworthy step accounting. It does not establish a step
 reduction advantage. The next stage can then define equal-goal open-ended tasks,
-shared oracles, SigNoz views, and a paced Linux pilot.
+shared oracles, inspectable offline reports, and a paced Linux pilot. The current
+delivery contract is [programmable-long-study-v1](mbtx-long-study.md).
 
 The user-supplied Linux archive `run-1789527207143.zip` was independently reviewed
 on 2026-09-16. All eight native captures reduced again; their states and step

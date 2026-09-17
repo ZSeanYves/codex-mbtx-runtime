@@ -1,5 +1,8 @@
 # Stage Three: Programmable Tool Evaluation
 
+Historical implementation record. Use the [long-workflow protocol](mbtx-long-study.md)
+for current task counts, uncapped decision collection and operator commands.
+
 Stage three activates the Rust collection adapter and shared MoonBit evaluation
 package. The completed small pilot motivated the [expanded study protocol](mbtx-study-protocol.md),
 which defines 24 scenarios, four input variants and two repetitions (192 pairs),
@@ -251,33 +254,12 @@ Missing result payloads remain unknown. A budget-exhausted attempt's accepted-st
 count is not its steps-to-success value. Shared edit counts remain visible even
 when the independent file oracle passes.
 
-Use SigNoz for interactive timelines. The native OTel batches and derived step
-spans share attempt identifiers. Start the official Collector once with
-`mbtx/observability/collector.yaml`, setting `MBTX_OTEL_ARCHIVE` to a writable
-archive directory and `MBTX_SIGNOZ_OTLP_ENDPOINT` to the local SigNoz OTLP HTTP
-endpoint. The documented collector configuration targets contrib 0.139.0.
-
-```bash
-otelcol-contrib --config mbtx/observability/collector.yaml
-<BUNDLE>/mbtx-eval import-otel <RUN>/attempts --endpoint http://127.0.0.1:4318
-<BUNDLE>/mbtx-eval import-otel <RUN>/reports/<REVISION> --endpoint http://127.0.0.1:4318
-```
-
-Import native attempts once and choose one report revision to avoid duplicate
-spans. The import command checks HTTP success and rejects partial ingestion.
-`collector-validation.yaml` verifies OTLP ingestion locally without SigNoz.
-See [SigNoz self-hosted ingestion](https://signoz.io/docs/ingestion/self-hosted/overview/)
-and the [OTLP specification](https://opentelemetry.io/docs/specs/otlp/) for the
-standard receiver contract.
-
-Recommended SigNoz views:
-
-| View | Selection and interpretation |
-| --- | --- |
-| Pair comparison | Filter `service.name=mbtx-evaluation`, then `mbtx.task` and `mbtx.arm`; inspect `mbtx.agent_steps` and `mbtx.oracle_success`. |
-| Step timeline | Open `mbtx.attempt` and its `codex.agent_step` children; each step has its native ID, outcome and source sequence. |
-| Native execution | Filter the matching `mbtx.attempt_id` in Codex's native trace service; inspect requests, scheduling, tools and compiler/runtime work. |
-| Failure inspection | Select `mbtx.status`, follow the evidence reference, and distinguish external responses, tool failures and incomplete observation. |
+The current report is a complete standalone HTML artifact with paired
+trajectories, step details, diagnostic resources and filters. Native OTel batches,
+standard trace JSON and derived OTLP step spans remain available. The former
+SigNoz-specific importer and deployment configuration have been removed; no
+collector service or subscription is needed to read the report. See the
+[current report contract](mbtx-long-study.md#reading-the-report).
 
 Step spans use observed producer wall timestamps for display. Request durations
 and queue waits use the collector's monotonic clock; cross-clock durations are
@@ -311,8 +293,9 @@ The offline validation run was `run-1789533732520`, using bundle fingerprint
 `460274bc969cca68434c4c093ed6086324f8353f`. The evidence remains in the local ignored
 `_build/stage-three-validation` directory. Final lint/format cleanup and the
 explicit collection-platform guard do not retroactively change that bundle.
-The Collector check proves OTLP ingestion, not deployment or usability of the
-SigNoz interface. SigNoz UI validation remains pending a local installation.
+The Collector check proves OTLP ingestion. The current delivery contract uses
+the [complete offline HTML report](mbtx-long-study.md#reading-the-report), with
+standard OTLP retained for independent tools; no SigNoz installation is planned.
 
 The protocol-v2 correction was checked separately on macOS ARM64 on 2026-09-16:
 
