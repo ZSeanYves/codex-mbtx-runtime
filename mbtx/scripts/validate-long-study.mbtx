@@ -48,6 +48,12 @@ async fn main {
       guard a is {"tool_outcomes":{"mbtx_cache_hits":Number(25,..),..},..} else {fail("Repeated program did not reuse its compilation")}
     }
   }
+  let recorded=extended+"-recorded"
+  @shell.Cmd(cli,["replay",extended,"--bundle",bundle,"--output",recorded]).run()
+  guard reports(recorded)[0] is {"attempts":Array(recorded_attempts),..} else {fail("Recorded replay missing")}
+  for a in recorded_attempts {
+    guard a is {"status":String("success"),"accounting":{"metrics":{"agent_steps":Number(28,..),"tool_calls":Number(53,..),..},..},..} else {fail("Recorded trajectory changed")}
+  }
   for fault in ["429","500","disconnect","truncated","stall"] {
     let destination=root+"-"+fault
     let args=common+["--output",destination,"--tasks","repository-impact-standard-v1","--replay-fault",fault]

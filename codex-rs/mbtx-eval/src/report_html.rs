@@ -6,22 +6,31 @@ use flate2::{Compression, write::GzEncoder};
 use serde_json::{Value, json};
 
 pub(crate) fn render(model: &Value) -> Result<String> {
-    let mut summary = model.clone();
+    let mut summary = serde_json::Map::new();
+    for (key, value) in model.as_object().context("report object")? {
+        if key != "attempts" { summary.insert(key.clone(),value.clone()); }
+    }
+    let mut summaries = Vec::new();
     let mut chunks = String::new();
-    for (index, attempt) in summary["attempts"].as_array_mut().context("attempts")?.iter_mut().enumerate() {
+    for (index, attempt) in model["attempts"].as_array().context("attempts")?.iter().enumerate() {
         let mut gzip = GzEncoder::new(Vec::new(), Compression::default());
         serde_json::to_writer(&mut gzip, attempt)?;
         gzip.flush()?;
         chunks.push_str(&format!("<script type=\"application/octet-stream\" id=\"attempt-{index}\">{}</script>\n",STANDARD.encode(gzip.finish()?)));
         // Keep only filterable fields and counts in the initial parse. Every
         // recorded step remains in the per-attempt chunk, without a row cap.
-        attempt.as_object_mut().context("attempt object")?.remove("details");
+        let mut brief = serde_json::Map::new();
+        for (key,value) in attempt.as_object().context("attempt object")? {
+            if !matches!(key.as_str(),"details"|"accounting"|"tool_outcomes"|"exchanges") {
+                brief.insert(key.clone(),value.clone());
+            }
+        }
         let accounting = &attempt["accounting"];
-        attempt["accounting"] = json!({"metrics":accounting["metrics"],"coverage":accounting["coverage"],"complete":accounting["complete"]});
-        attempt.as_object_mut().unwrap().remove("tool_outcomes");
-        attempt.as_object_mut().unwrap().remove("exchanges");
-        attempt["chunk"] = json!(index);
+        brief.insert("accounting".into(), json!({"metrics":accounting["metrics"],"coverage":accounting["coverage"],"complete":accounting["complete"]}));
+        brief.insert("chunk".into(), json!(index));
+        summaries.push(Value::Object(brief));
     }
+    summary.insert("attempts".into(),json!(summaries));
     // JSON inside a script element must escape the HTML parser's end tag.
     let data = serde_json::to_string(&summary)?.replace('<',"\\u003c").replace('>',"\\u003e").replace('&',"\\u0026");
     Ok(format!("{}<style>{}</style></head><body>{}<script type=\"application/json\" id=\"report-data\">{data}</script>{chunks}<script>{}</script><script>{}</script></body></html>",
