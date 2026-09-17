@@ -2,6 +2,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+#[cfg(unix)]
 fn sandbox_reentry_exposes_only_the_bundle_executable() -> Result<()> {
     let root = tempfile::tempdir()?;
     let root = root.path().canonicalize()?;
@@ -15,12 +16,27 @@ fn sandbox_reentry_exposes_only_the_bundle_executable() -> Result<()> {
     for name in ["workspace", "home", "tmp"] {
         fs::create_dir_all(work.join(name))?;
     }
+    let socket_root = tempfile::Builder::new().prefix("mw-").tempdir_in("/tmp")?;
+    let socket = socket_root.path().join("s");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket)?;
+    fs::write(
+        work.join("worker-socket.json"),
+        serde_json::to_vec(&socket)?,
+    )?;
     let profile = permissions(&work, &bundle, &moon_home)?;
     let encoded = toml::to_string(&profile)?;
     let decoded: toml::Value = toml::from_str(&encoded)?;
     let filesystem = decoded["evaluation"]["filesystem"].as_table().unwrap();
     let mut expected = toml::Table::from_iter([
         (":minimal".into(), "read".into()),
+        (
+            socket_root
+                .path()
+                .canonicalize()?
+                .to_string_lossy()
+                .into_owned(),
+            "write".into(),
+        ),
         (
             bundle.join("codex").to_string_lossy().into_owned(),
             "read".into(),
@@ -42,6 +58,14 @@ fn sandbox_reentry_exposes_only_the_bundle_executable() -> Result<()> {
     }
     // A broad grant would expose the model catalog, manifest and sibling arms.
     assert_eq!(filesystem, &expected);
+    for (path, access) in filesystem {
+        if access.as_str() == Some("write") {
+            assert!(
+                Path::new(path).is_dir(),
+                "writable root must support metadata children: {path}"
+            );
+        }
+    }
     Ok(())
 }
 

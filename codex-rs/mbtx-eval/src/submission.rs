@@ -24,7 +24,7 @@ pub(crate) struct Validator<'a> {
 }
 
 impl Validator<'_> {
-    fn command(&self, work: &Path, readable: Option<&Path>) -> Result<Command> {
+    pub(crate) fn command(&self, work: &Path, readable: Option<&Path>) -> Result<Command> {
         let moon_home = Path::new(
             self.bundle_info["moon_home"]
                 .as_str()

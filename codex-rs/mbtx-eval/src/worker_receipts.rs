@@ -8,6 +8,8 @@ use serde_json::Value;
 use serde_json::json;
 use std::fs;
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -67,7 +69,10 @@ impl WorkerReceipts {
     pub async fn start(evidence: &Path, executable: &Path) -> Result<Self> {
         // Unix socket paths have a small OS limit; never put them under a long run path.
         let parent = Path::new("/tmp").join(format!("mw-{}", uuid::Uuid::new_v4().simple()));
-        fs::create_dir(&parent)?;
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        builder.mode(0o700);
+        builder.create(&parent)?;
         let socket = parent.join("s");
         let listener = UnixListener::bind(&socket)?;
         let hash = crate::evidence::digest(&fs::read(executable)?);

@@ -29,9 +29,10 @@ fn independent_retry_limits_reach_both_arms_without_unbounded_fallback() -> Resu
     let temp = tempfile::tempdir()?;
     let root = temp.path();
     fs::write(root.join("codex"), b"sandbox path fixture")?;
+    fs::create_dir(root.join("worker-ipc"))?;
     fs::write(
         root.join("worker-socket.json"),
-        serde_json::to_vec(&root.join("worker.sock"))?,
+        serde_json::to_vec(&root.join("worker-ipc/s"))?,
     )?;
     for folder in ["workspace", "home", "tmp"] {
         fs::create_dir(root.join(folder))?;

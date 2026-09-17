@@ -1,4 +1,4 @@
-//! Bounded OS capture for post-submission validation, outside model-step timing.
+//! Bounded OS capture for local validation, outside model-step timing.
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -43,7 +43,7 @@ pub(crate) async fn capture(
     let started = Instant::now();
     let mut child = command
         .spawn()
-        .context("start sandboxed submission validation")?;
+        .context("start sandboxed validation process")?;
     let pid = child.id().context("validation process PID")?;
     let stdout = tokio::spawn(drain(child.stdout.take().context("stdout")?));
     let stderr = tokio::spawn(drain(child.stderr.take().context("stderr")?));

@@ -89,6 +89,37 @@ included in full offline validation. The new retry policy is frozen in each run
 manifest; this evidence does not amend earlier results or establish online
 reliability.
 
+## Linux sandbox follow-up
+
+The supplied Linux run `long-study-validation/run-1789679290505` used local
+fixed replay, not the online pilot. All 40 arms were blocked by the same sandbox
+setup error, before executing task code. The worker socket file `/tmp/mw-*/s`
+had been registered as a writable root. Linux bubblewrap then tried to protect
+metadata children such as `s/.git` and `s/.codex`, which cannot exist below a
+socket. Both interfaces reported `Not a directory`; external request failures
+were zero. The preceding 70 unsandboxed fixture checks and nine Codex integration
+tests did not cover this evaluator-specific socket configuration.
+
+The original reports label these arms `task_failure`; they are evidence of an
+evaluation setup defect, not model or MBTX task-completion results. Original
+records are preserved. The correction grants access to the receipt service's
+dedicated directory, created with mode 0700, and preserves the sibling-attempt
+and private-evidence boundaries. A real socket regression checks the generated
+profile. Every collection invocation now performs sandbox entry, worker hashing
+and authenticated IPC checks before the relay probe. Failure retains local
+diagnostics and an unstarted partial report instead of launching a batch.
+
+Follow-up macOS checks passed all 22 existing evaluator tests and the new
+sandbox-start rejection test. Actual Codex replay passed three pairs (six arms):
+data reconciliation, extended dependent jobs and extended reusable recovery,
+including fresh-input delivery validation. The sandbox preflight produced both
+authenticated worker receipts. Evidence is `_build/socket-fix-validation`,
+report `ac8a0dc2-9554-4365-a8a0-aed71a1d3041`, execution bundle
+`beeab751d46e49cf4f9c857a92ca29ae79c27dc1`.
+
+The corrected Linux full replay remains a handoff check. These macOS results
+do not establish Linux acceptance or autonomous task performance.
+
 ## Observation calibration
 
 Minimal/full/full/minimal conditions each ran two pairs: 16 arms. Both conditions

@@ -129,7 +129,16 @@ A host-level account lock prevents two collectors on this
 host from sharing the account concurrently; other applications or hosts remain
 outside this control.
 
-The initial probe needs one success in up to three attempts. Collection pauses
+Before any relay probe or task attempt, each collection invocation checks real
+sandbox entry and authenticated worker IPC in an independent workspace. The
+shared filesystem profile exposes the attempt-private socket directory rather
+than treating a socket file as a writable directory. A failed check stops
+collection before API requests and retains `preflight-*/execution/stderr`,
+process observations and `result.json`, together with a partial report. This
+preparation is outside model-step and attempt timing; it does not execute a task
+or change a task workspace.
+
+The initial relay probe needs one success in up to three attempts. Collection pauses
 after five consecutive infrastructure-failed arms, eight infrastructure failures
 in the latest sixteen arms, or loss of a core collection component. Isolated
 relay failures do not invalidate other evidence. Completed pairs and failed

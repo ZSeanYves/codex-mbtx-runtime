@@ -9,6 +9,7 @@ mod evidence;
 mod gate;
 mod http_headers;
 mod observe;
+mod preflight;
 mod progress;
 mod replay;
 mod report;

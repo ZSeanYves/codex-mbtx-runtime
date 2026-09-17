@@ -352,6 +352,15 @@ async fn collect_schedule(
     let config = execution.config;
     let manifest = execution.manifest;
     let gate = execution.gate;
+    crate::preflight::check(
+        root,
+        &crate::submission::Validator {
+            bundle: execution.bundle,
+            bundle_info: execution.bundle_info,
+            path: manifest["path"].as_str().context("recorded PATH")?,
+        },
+    )
+    .await?;
     if args.mode == "relay" && !args.resume && !probe(root, config, gate).await? {
         return Ok("relay_probe_failed");
     }

@@ -28,7 +28,14 @@ pub(crate) fn permissions(work: &Path, bundle: &Path, moon_home: &Path) -> Resul
     let worker_address = work.join("worker-socket.json");
     if worker_address.exists() {
         let socket: String = serde_json::from_slice(&fs::read(worker_address)?)?;
-        filesystem.insert(socket, "write".into());
+        // Writable roots receive protected metadata children (.git/.codex).
+        // A Unix socket is not a directory: bind only its attempt-private
+        // directory, never the socket itself or the shared /tmp parent.
+        let directory = Path::new(&socket)
+            .parent()
+            .context("worker socket directory")?
+            .canonicalize()?;
+        filesystem.insert(directory.to_string_lossy().into_owned(), "write".into());
     }
     // Bubblewrap re-enters this binary to apply seccomp before the task starts.
     // Native tool execution and `codex sandbox` do not add this readable path
