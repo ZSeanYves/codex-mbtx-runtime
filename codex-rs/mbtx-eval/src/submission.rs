@@ -50,8 +50,12 @@ impl Validator<'_> {
         fs::create_dir(work.join("codex-home"))?;
         write_new(&work.join("codex-home/config.toml"), config.as_bytes())?;
         let mut command = Command::new(self.bundle.join("codex"));
-        command
-            .args(["sandbox", "--permission-profile", "evaluation", "-C"])
+        command.arg("sandbox");
+        if work.join("worker-socket.json").exists() {
+            let socket: String = serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
+            command.arg("--allow-unix-socket").arg(socket);
+        }
+        command.args(["--permission-profile", "evaluation", "-C"])
             .arg(work.join("workspace"))
             .arg("--")
             .arg(work.join("workspace/fixture-worker"))
@@ -69,6 +73,10 @@ impl Validator<'_> {
             .env("MOON_DEP_CACHE", work.join("workspace/dependencies"))
             .env("MOON_BUILD_CACHE", work.join("workspace/build-cache"));
         crate::workspace::git_environment(&mut command, &work.join("workspace"));
+        if work.join("worker-socket.json").exists() {
+            let socket: String = serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
+            command.env("MBTX_WORKER_SOCKET", socket);
+        }
         Ok(command)
     }
 
@@ -214,6 +222,8 @@ impl Validator<'_> {
                 &case_evidence.join("workspace.json"),
                 &crate::workspace::prepare(&workspace, &case_work.join("home"), self.path).await?,
             )?;
+            let receipts = crate::worker_receipts::WorkerReceipts::start(&case_evidence, &self.bundle.join("fixture-worker")).await?;
+            json_new(&case_work.join("worker-socket.json"), &json!(receipts.socket))?;
             let mut command = self.command(
                 &case_work,
                 if arm == "mbtx_program" {
@@ -237,14 +247,16 @@ impl Validator<'_> {
             let process = crate::validation_process::capture(
                 &mut command,
                 &case_evidence.join("execution"),
-                Duration::from_secs(30),
+                Duration::from_secs(60),
             )
             .await?;
             ensure!(
                 case_work.join("tmp/entry-observed").is_file(),
                 "validation command never entered sandbox; inspect case execution stderr"
             );
-            let snapshot = snapshot(&workspace, case)?;
+            receipts.finish().await?;
+            let mut snapshot = snapshot(&workspace, case)?;
+            snapshot["worker_events"] = crate::evidence::worker_events(&case_evidence)?;
             let facts = json!({"index":index,"input":"fresh workspace","process":process,"snapshot":snapshot});
             json_new(&case_evidence.join("facts.json"), &facts)?;
             result["cases"].as_array_mut().context("cases")?.push(facts);

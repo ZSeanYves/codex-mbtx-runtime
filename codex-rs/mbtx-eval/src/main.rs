@@ -15,12 +15,16 @@ mod request_contract;
 mod submission;
 mod validation_process;
 mod workspace;
+mod scheduling;
+mod worker_receipts;
+mod report_details;
+mod report_html;
+mod progress;
 
 use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
-use serde_json::json;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -70,12 +74,6 @@ enum Operation {
         bundle: Option<PathBuf>,
         #[arg(long)]
         follow: bool,
-    },
-    /// Send archived native OTel and step spans to a local SigNoz collector.
-    ImportOtel {
-        run: PathBuf,
-        #[arg(long, default_value = "http://127.0.0.1:4318")]
-        endpoint: String,
     },
 }
 
@@ -160,6 +158,8 @@ async fn main() -> Result<()> {
                 resume: false,
                 replay_source: Some(run.canonicalize()?),
                 replay_fault: None,
+                replay_prefix_turns: 0,
+                observation: manifest["observation"].as_str().unwrap_or("full").to_owned(),
             })
             .await?;
             println!("{}", path.display());
@@ -181,62 +181,11 @@ async fn main() -> Result<()> {
         }
         Operation::Log {
             run,
-            bundle,
+            bundle: _,
             follow,
         } => {
-            let bundle = default_bundle(bundle)?;
-            bundle::verify_analysis(&bundle)?;
-            let mut worker = analysis::Analysis::start(&bundle).await?;
-            loop {
-                let manifest = evidence::read_json(&run.join("run.json"))?;
-                let attempts = report::assess(&run, &mut worker).await?;
-                let report = worker
-                    .query(json!({"op":"report","manifest":manifest,"attempts":attempts}))
-                    .await?;
-                let current = report["attempts"]
-                    .as_array()
-                    .and_then(|a| a.last())
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                let exchange = current["exchanges"]
-                    .as_array()
-                    .and_then(|a| a.last())
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                let phase = if current["outcome"].is_object() {
-                    "arm finalized"
-                } else if exchange["headers"].is_object() {
-                    "receiving response / tool work / shutdown; inspect native trace"
-                } else if exchange["started"].is_object() {
-                    "waiting for response headers"
-                } else if exchange["evidence"].is_string() {
-                    "request queue"
-                } else {
-                    "preparing Codex or probing"
-                };
-                println!(
-                    "{}",
-                    json!({"run_id":report["run_id"],"partial":report["partial"],"itt":report["itt"],"gate":report["gate"],"current_attempt":current["attempt_id"],"phase":phase,"latest_queue_wait_ns":exchange["started"]["queue_wait_ns"],"remaining_time_estimate":null})
-                );
-                if !follow || report["partial"] == false || report["gate"]["pause"] == true {
-                    break;
-                }
-                #[cfg(unix)]
-                {
-                    use std::os::fd::AsRawFd;
-                    let lock = std::fs::File::open(run.join("collector.lock"))?;
-                    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0
-                    {
-                        break;
-                    }
-                }
-                tokio::select! {_=tokio::time::sleep(std::time::Duration::from_secs(2))=>(),_=tokio::signal::ctrl_c()=>break}
-            }
+            progress::log(&run,follow).await?;
         }
-        Operation::ImportOtel { run, endpoint } => println!(
-            "Imported {} OTLP batches",
-            observe::import(&run, &endpoint).await?
-        ),
     }
     Ok(())
 }

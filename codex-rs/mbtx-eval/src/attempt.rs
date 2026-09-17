@@ -55,7 +55,9 @@ impl Execution<'_> {
             fs::create_dir(work.join(child))?;
         }
         let workspace = work.join("workspace");
-        for path in task["files"].as_object().context("files")?.keys() {
+        let template = root.join("fixtures").join(task["id"].as_str().context("task id")?);
+        let prepared = if template.join("baseline.json").exists() { Some(crate::workspace::instantiate(&template,&workspace)?) } else { None };
+        if prepared.is_none() { for path in task["files"].as_object().context("files")?.keys() {
             let file = workspace.join(safe_relative(path)?);
             fs::create_dir_all(file.parent().context("parent")?)?;
             fs::copy(
@@ -69,18 +71,20 @@ impl Execution<'_> {
                 use std::os::unix::fs::PermissionsExt;
                 fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
             }
-        }
+        } }
         fs::copy(
             bundle.join("fixture-worker"),
             workspace.join("fixture-worker"),
         )?;
-        let workspace_facts = crate::workspace::prepare(
+        let workspace_facts = if let Some(facts) = prepared { facts } else { crate::workspace::prepare(
             &workspace,
             &work.join("home"),
             manifest["path"].as_str().context("recorded PATH")?,
         )
-        .await?;
+        .await? };
         json_new(&directory.join("workspace.json"), &workspace_facts)?;
+        let receipts = crate::worker_receipts::WorkerReceipts::start(directory, &bundle.join("fixture-worker")).await?;
+        json_new(&work.join("worker-socket.json"), &json!(receipts.socket))?;
         let endpoint = format!("{}/a/{id}/v1", gate.endpoint);
         let instructions = manifest["protocol"]["instructions"]
             .as_str()
@@ -96,7 +100,7 @@ impl Execution<'_> {
             ),
             _ => instructions.to_owned(),
         };
-        let toml = child_config(
+        let mut toml = child_config(
             config,
             bundle,
             bundle_info,
@@ -106,8 +110,15 @@ impl Execution<'_> {
                 attempt_id: id,
                 instructions: &instructions,
                 work: &work,
+                evidence: directory,
             },
         )?;
+        if manifest["observation"] == "minimal" {
+            let mut value:toml::Value=toml::from_str(&toml)?;
+            value["otel"]["exporter"]="none".into();
+            value["otel"]["trace_exporter"]="none".into();
+            toml=toml::to_string_pretty(&value)?;
+        }
         write_new(&work.join("codex-home/config.toml"), toml.as_bytes())?;
         write_new(&directory.join("effective-config.toml"), toml.as_bytes())?;
         let mut command = Command::new(bundle.join("codex"));
@@ -164,10 +175,14 @@ impl Execution<'_> {
             _=tokio::signal::ctrl_c()=> {termination="cancelled"; terminate(&mut child,pid).await?},
         };
         let elapsed = start.elapsed().as_nanos() as u64;
+        let wall_end = now_ms();
+        let draining = Instant::now();
         route.close();
         tokio::time::timeout(Duration::from_secs(15), gate.drain())
             .await
             .context("upstream stream failed to drain; preserve open attempt")?;
+        receipts.finish().await?;
+        let collector_drain_ns = draining.elapsed().as_nanos() as u64;
         if route.observation_failures.load(Ordering::SeqCst) > 0 {
             termination = "harness_error";
         }
@@ -180,12 +195,14 @@ impl Execution<'_> {
         let signal: Option<i32> = None;
         json_new(
             &directory.join("outcome.json"),
-            &json!({"termination":termination,"exit_code":status.code(),"signal":signal,"elapsed_ns":elapsed,"wall_end_ms":now_ms(),"pid":pid,"pair_id":pair,"shutdown_included":true}),
+            &json!({"termination":termination,"exit_code":status.code(),"signal":signal,"elapsed_ns":elapsed,"wall_end_ms":wall_end,"pid":pid,"pair_id":pair,"shutdown_included":true,"collector_drain_ns":collector_drain_ns}),
         )?;
-        json_new(
-            &directory.join("snapshot.json"),
-            &snapshot(&workspace, task)?,
-        )?;
+        let snapshot_started = Instant::now();
+        let mut snapshot = snapshot(&workspace, task)?;
+        snapshot["worker_events"] = crate::evidence::worker_events(directory)?;
+        json_new(&directory.join("snapshot.json"), &snapshot)?;
+        let snapshot_ns = snapshot_started.elapsed().as_nanos() as u64;
+        let validation_started = Instant::now();
         if task["acceptance"] == "programs" {
             let validator = crate::submission::Validator {
                 bundle,
@@ -209,6 +226,7 @@ impl Execution<'_> {
             };
             json_new(&directory.join("submission.json"), &validation)?;
         }
+        json_new(&directory.join("postprocess.json"),&json!({"snapshot_ns":snapshot_ns,"submission_validation_ns":if task["acceptance"]=="programs"{Some(validation_started.elapsed().as_nanos() as u64)}else{None},"scope":"after Codex process wait; excluded from attempt_process_ms"}))?;
         seal(directory)?;
         ensure!(
             termination != "cancelled",

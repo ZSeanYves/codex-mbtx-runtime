@@ -65,7 +65,7 @@ pub(crate) fn fault(name: &str) -> Reply {
     }
 }
 
-pub(crate) fn fixed(task: &Value, arm: &str) -> Result<Vec<Reply>> {
+pub(crate) fn fixed(task: &Value, arm: &str, prefix_turns: usize) -> Result<Vec<Reply>> {
     let output = task["output"].as_str().context("output file")?;
     let expected = serde_json::to_string(&task["expected"])?;
     let boundary = "test \"$(git rev-parse --show-toplevel)\" = \"$PWD\" && test -z \"$(git status --porcelain)\" && test ! -r ../../../run.json";
@@ -108,7 +108,15 @@ pub(crate) fn fixed(task: &Value, arm: &str) -> Result<Vec<Reply>> {
     };
     // Deliberately prescribed solutions validate transport, tool execution and
     // independent negative oracle tests. They are never research samples.
-    Ok(vec![
+    let mut replies=Vec::new();
+    for turn in 0..prefix_turns {
+        let (name,args)=if arm=="mbtx_program" {("mbtx",json!({"source":"fn main { println(\"fresh execution 雪\") }"}))} else {("exec_command",json!({"cmd":"printf 'fresh execution 雪\\n'","login":false}))};
+        replies.push(sse(&[
+            json!({"type":"function_call","call_id":format!("prefix-{turn}-run"),"name":name,"arguments":args.to_string()}),
+            json!({"type":"function_call","call_id":format!("prefix-{turn}-read"),"name":"read_resource","arguments":json!({"resource_id":"reference:moonbit","offset":0,"max_bytes":128}).to_string()}),
+        ],&format!("prefix-{turn}")));
+    }
+    replies.extend([
         sse(
             &[
                 json!({"type":"function_call","call_id":"fixed-output","name":if arm=="mbtx_program" {"mbtx"} else {"exec_command"},"arguments":arguments.to_string()}),
@@ -121,7 +129,8 @@ pub(crate) fn fixed(task: &Value, arm: &str) -> Result<Vec<Reply>> {
             ],
             "fixed-final",
         ),
-    ])
+    ]);
+    Ok(replies)
 }
 
 pub(crate) fn recorded(attempt: &Path) -> Result<Vec<Reply>> {

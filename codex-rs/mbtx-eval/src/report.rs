@@ -13,12 +13,16 @@ use crate::evidence::read_json;
 use crate::evidence::verify;
 use crate::evidence::write_new;
 
-pub(crate) fn response_terminal(body: &str) -> Option<&'static str> {
+pub(crate) fn response_summary(body: &str) -> (Option<&'static str>, Option<String>) {
     let mut data = String::new();
     let mut terminal = None;
+    let mut response_id = None;
     for line in body.lines().chain(std::iter::once("")) {
         if line.is_empty() {
             if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                if let Some(id) = value["response"]["id"].as_str() {
+                    response_id = Some(id.to_owned());
+                }
                 match value["type"].as_str() {
                     Some("response.completed") => terminal = Some("completed"),
                     Some("response.failed" | "error") => terminal = Some("failed"),
@@ -31,7 +35,7 @@ pub(crate) fn response_terminal(body: &str) -> Option<&'static str> {
             data.push('\n');
         }
     }
-    terminal
+    (terminal, response_id)
 }
 
 pub(crate) fn find_attempt(root: &Path, pair: &Value, arm: &str) -> Result<PathBuf> {
@@ -58,6 +62,18 @@ pub(crate) async fn assess_attempt(
     manifest: &Value,
     analysis: &mut Analysis,
 ) -> Result<Value> {
+    let sealed = directory.join("seal.json").exists();
+    let verified = sealed && verify(directory).unwrap_or(false);
+    let cache = if verified && manifest["manifest_integrity"] != false {
+        let key = crate::evidence::digest(&[fs::read(directory.join("seal.json"))?,serde_json::to_vec(&manifest["protocol"])?,analysis.fingerprint.as_bytes().to_vec()].concat());
+        let root = directory.parent().and_then(Path::parent).context("run root")?.join("derived-analysis");
+        fs::create_dir_all(&root)?;
+        Some(root.join(format!("{key}.json")))
+    } else { None };
+    if let Some(path) = &cache && let Ok(cached) = read_json(path)
+        && cached["sha256"] == crate::evidence::digest(&serde_json::to_vec(&cached["analysis"])?) {
+        return Ok(cached["analysis"].clone());
+    }
     let assignment = read_json(&directory.join("assignment.json")).unwrap_or(Value::Null);
     let attempt_id = directory
         .file_name()
@@ -94,20 +110,8 @@ pub(crate) async fn assess_attempt(
             match codex_rollout_trace::replay_bundle(&bundles[0]) {
                 Ok(value) => {
                     trace = serde_json::to_value(value)?;
-                    for (id, tool) in trace["tool_calls"].as_object().context("native tools")? {
-                        if tool["kind"]["name"] != "mbtx" {
-                            continue;
-                        }
-                        let payload = tool["raw_result_payload_id"]
-                            .as_str()
-                            .and_then(|id| trace["raw_payloads"][id]["path"].as_str());
-                        let result = payload.and_then(|path| {
-                            let path = bundles[0].join(crate::evidence::safe_relative(path).ok()?);
-                            let raw = read_json(&path).ok()?;
-                            Some(json!({"evidence":path.strip_prefix(directory).ok()?,"output":serde_json::from_str::<Value>(raw["response_item"]["output"].as_str()?).ok()?}))
-                        }).unwrap_or(Value::Null);
-                        tool_results.insert(id.clone(), result);
-                    }
+                    tool_results = crate::report_details::tool_results(&bundles[0], &trace)
+                        .as_object().cloned().unwrap_or_default();
                 }
                 Err(error) => errors.push(format!("native reduction: {error}")),
             }
@@ -132,15 +136,11 @@ pub(crate) async fn assess_attempt(
             let sse = value["headers"]["content_type"]
                 .as_str()
                 .is_some_and(|v| v.starts_with("text/event-stream"));
-            value["sse_terminal"] = if sse {
-                json!(
-                    fs::read_to_string(request.join("response.body"))
-                        .ok()
-                        .and_then(|s| response_terminal(&s))
-                )
-            } else {
-                Value::Null
-            };
+            let (terminal, response_id) = if sse {
+                fs::read_to_string(request.join("response.body")).ok().map(|body|response_summary(&body)).unwrap_or_default()
+            } else { (None,None) };
+            value["sse_terminal"] = json!(terminal);
+            value["response_id"] = json!(response_id);
             value["sse_expected"] = json!(sse);
             value["evidence"] = json!(request.strip_prefix(directory)?.to_string_lossy());
             exchanges.push(value);
@@ -149,14 +149,20 @@ pub(crate) async fn assess_attempt(
     let integrity = if !assignment_valid || manifest["manifest_integrity"] == false {
         json!(false)
     } else if directory.join("seal.json").exists() {
-        json!(verify(directory).unwrap_or(false))
+        json!(verified)
     } else {
         Value::Null
     };
-    let facts = json!({"attempt_id":attempt_id,"pair_id":assignment["pair_id"],"arm":assignment["arm"],"trace":trace,"tool_results":tool_results,"snapshot":snapshot,"outcome":outcome,"workspace":read_json(&directory.join("workspace.json")).unwrap_or(Value::Null),"submission":read_json(&directory.join("submission.json")).unwrap_or(Value::Null),"execution_error":read_json(&directory.join("execution-error.json")).unwrap_or(Value::Null),"exchanges":exchanges,"integrity":integrity,"evidence":{"directory":format!("attempts/{attempt_id}"),"errors":errors}});
-    analysis
+    let facts = json!({"attempt_id":attempt_id,"pair_id":assignment["pair_id"],"arm":assignment["arm"],"trace":trace,"tool_results":tool_results,"snapshot":snapshot,"outcome":outcome,"workspace":read_json(&directory.join("workspace.json")).unwrap_or(Value::Null),"postprocess":read_json(&directory.join("postprocess.json")).unwrap_or(Value::Null),"submission":read_json(&directory.join("submission.json")).unwrap_or(Value::Null),"execution_error":read_json(&directory.join("execution-error.json")).unwrap_or(Value::Null),"exchanges":exchanges,"integrity":integrity,"evidence":{"directory":format!("attempts/{attempt_id}"),"errors":errors}});
+    let result = analysis
         .query(json!({"op":"attempt","task":task,"facts":facts}))
-        .await
+        .await?;
+    if let Some(path) = cache && !path.exists() {
+        // A partial cache file is never accepted: parsing and its own hash must
+        // both pass. Raw evidence is still verified before every reuse.
+        json_new(&path,&json!({"sha256":crate::evidence::digest(&serde_json::to_vec(&result)?),"analysis":result}))?;
+    }
+    Ok(result)
 }
 
 pub(crate) async fn assess(root: &Path, analysis: &mut Analysis) -> Result<Vec<Value>> {
@@ -175,15 +181,6 @@ pub(crate) async fn assess(root: &Path, analysis: &mut Analysis) -> Result<Vec<V
     Ok(result)
 }
 
-pub(crate) fn escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 fn cell(value: &Value) -> String {
     value
         .as_str()
@@ -192,6 +189,7 @@ fn cell(value: &Value) -> String {
 }
 
 fn render(model: &Value, format: &str) -> Result<String> {
+    if format == "html" { return crate::report_html::render(model); }
     if format == "json" {
         return Ok(serde_json::to_string_pretty(model)?);
     }
@@ -213,6 +211,11 @@ fn render(model: &Value, format: &str) -> Result<String> {
         "Shell command failures".into(),
         "Shared edit calls".into(),
         "Evidence".into(),
+        "Cohort".into(),
+        "Complexity".into(),
+        "Pair".into(),
+        "Repeat".into(),
+        "Steps to success".into(),
     ]];
     for a in model["attempts"].as_array().context("attempts")? {
         rows.push(vec![
@@ -233,7 +236,20 @@ fn render(model: &Value, format: &str) -> Result<String> {
             cell(&a["tool_outcomes"]["shell_command_failures"]),
             cell(&a["tool_outcomes"]["shared_edit_calls"]),
             cell(&a["evidence"]["directory"]),
+            cell(&a["cohort"]),
+            cell(&a["complexity"]),
+            cell(&a["pair_id"]),
+            cell(&model["pairs"].as_array().into_iter().flatten().find(|p|p["pair_id"]==a["pair_id"]).unwrap_or(&Value::Null)["repeat"]),
+            cell(&a["steps_to_success"]),
         ]);
+    }
+    for pair in model["pairs"].as_array().into_iter().flatten() {
+        for arm in ["shell_tool","mbtx_program"] {
+            if model["attempts"].as_array().into_iter().flatten().any(|a|a["pair_id"]==pair["pair_id"]&&a["arm"]==arm){continue;}
+            let mut row=vec!["null".to_owned();rows[0].len()];
+            for (index,value) in [(0,cell(&pair["task_id"])),(1,cell(&pair["scenario"])),(2,cell(&pair["variant"])),(3,arm.into()),(4,"not_started".into()),(17,cell(&pair["cohort"])),(18,cell(&pair["complexity"])),(19,cell(&pair["pair_id"])),(20,cell(&pair["repeat"]))]{row[index]=value;}
+            rows.push(row);
+        }
     }
     if format == "csv" {
         return Ok(rows
@@ -271,9 +287,6 @@ fn render(model: &Value, format: &str) -> Result<String> {
     let mut strata = String::from(
         "| Scenario | Shell successful / assigned | MBTX successful / assigned | MBTX minus Shell steps | Conditional 95% interval |\n|---|---:|---:|---:|---|\n",
     );
-    let mut strata_html = String::from(
-        "<table><tr><th>Scenario</th><th>Shell successful / assigned</th><th>MBTX successful / assigned</th><th>MBTX minus Shell steps</th><th>Conditional 95% interval</th></tr>",
-    );
     for row in model["by_scenario"].as_array().into_iter().flatten() {
         let cells = [
             cell(&row["name"]),
@@ -296,16 +309,13 @@ fn render(model: &Value, format: &str) -> Result<String> {
                 .collect::<Vec<_>>()
                 .join(" | ")
         ));
-        strata_html.push_str(&format!(
-            "<tr>{}</tr>",
-            cells
-                .iter()
-                .map(|v| format!("<td>{}</td>", escape(v)))
-                .collect::<String>()
-        ));
     }
-    strata_html.push_str("</table>");
     if format == "md" {
+        let mut cohorts=String::from("| Cohort | Comparable pairs | Mean step difference | 95% interval | Mean step ratio | Ratio 95% interval |\n|---|---:|---:|---|---:|---|\n");
+        for group in model["by_cohort"].as_array().into_iter().flatten(){
+            let e=&group["conditional"];
+            cohorts.push_str(&format!("| {} | {} | {} | {} | {} | {} |\n",cell(&group["name"]),e["pairs"],e["mean_step_difference"],e["confidence_interval"],e["mean_step_ratio"],e["ratio_confidence_interval"]));
+        }
         let table = rows
             .iter()
             .map(|row| {
@@ -319,36 +329,13 @@ fn render(model: &Value, format: &str) -> Result<String> {
             })
             .collect::<Vec<_>>();
         return Ok(format!(
-            "# Programmable MBTX evaluation report\n\n{summary}\n\n{population}\n\n{strata}\n\n## Attempt evidence\n\n{}\n|{}|\n{}\n\nFirst trajectory divergences, family strata, per-case submission validation and success-by-step curves are in report.json; their source sequences identify the raw observations. Divergence does not establish causation. Submitted source and its hash remain in each attempt's submission directory.\n",
+            "# Programmable MBTX evaluation report\n\n{summary}\n\n{population}\n\n{cohorts}\n\n{strata}\n\n## Attempt evidence\n\n{}\n|{}|\n{}\n\nAll recorded decisions, payloads and full output resources are embedded in report.html and report.json. Ordinal trajectory differences are not semantic alignment or causal attribution. Success-conditioned estimates may be selected by differential failure; repetitions are nested within input cases. Native evidence hashes and the frozen protocol are retained in the report method and per-attempt detail records.\n",
             table[0],
             vec!["---"; rows[0].len()].join("|"),
             table[1..].join("\n")
         ));
     }
-    anyhow::ensure!(format == "html", "unsupported report format");
-    let mut html = format!(
-        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Programmable MBTX evaluation</title><style>body{{font:16px system-ui;margin:2rem;max-width:1200px}}table{{border-collapse:collapse}}td,th{{padding:.6rem;border:1px solid #bbb;text-align:left}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}a{{color:#075bb0}}.overflow{{overflow:auto}}summary{{cursor:pointer;margin:1rem 0}}</style><h1>Programmable MBTX evaluation</h1><pre>{}</pre><p>{}</p><p>Interactive trace inspection: import the accompanying OTLP JSON into SigNoz. This summary is rebuilt solely from retained evidence.</p><div class=\"overflow\">{strata_html}</div><details><summary>Individual attempts and raw evidence</summary><div class=\"overflow\"><table>",
-        escape(&summary),
-        escape(&population)
-    );
-    for (i, row) in rows.iter().enumerate() {
-        html.push_str("<tr>");
-        for (j, value) in row.iter().enumerate() {
-            let tag = if i == 0 { "th" } else { "td" };
-            let text = if i > 0 && j == row.len() - 1 {
-                format!(
-                    "<a href=\"../../{}/assignment.json\">Raw evidence</a>",
-                    escape(value)
-                )
-            } else {
-                escape(value)
-            };
-            html.push_str(&format!("<{tag}>{text}</{tag}>"));
-        }
-        html.push_str("</tr>");
-    }
-    html.push_str("</table></div></details><p><a href=\"report.json\">Full analysis JSON, validation cases and source hashes</a></p></html>");
-    Ok(html)
+    anyhow::bail!("unsupported report format: {format}")
 }
 
 pub(crate) async fn generate(
@@ -357,6 +344,7 @@ pub(crate) async fn generate(
     analysis: &mut Analysis,
     format: &str,
 ) -> Result<PathBuf> {
+    let generation_started = std::time::Instant::now();
     let mut manifest = read_json(&root.join("run.json"))?;
     manifest["manifest_integrity"] = json!(crate::evidence::verify_manifest(root).unwrap_or(false));
     let attempts = assess(root, analysis).await?;
@@ -373,9 +361,15 @@ pub(crate) async fn generate(
     manifest["collection_stop_reason"] = latest
         .map(|v| v["stop_reason"].clone())
         .unwrap_or(Value::Null);
-    let model = analysis
+    let mut model = analysis
         .query(json!({"op":"report","manifest":manifest,"attempts":attempts}))
         .await?;
+    model["method"] = json!({"manifest":manifest,"analyzer_bundle":read_json(&bundle.join("bundle.json"))?,"rendering":"ECharts 6.0.0; all data and assets embedded; no network requests"});
+    for attempt in model["attempts"].as_array_mut().context("attempts")? {
+        let directory = root.join("attempts").join(crate::evidence::safe_relative(attempt["attempt_id"].as_str().context("attempt id")?)?);
+        attempt["details"] = crate::report_details::collect(&directory)?;
+    }
+    let analysis_ns = generation_started.elapsed().as_nanos();
     let output = root.join("reports").join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&output)?;
     json_new(
@@ -396,6 +390,7 @@ pub(crate) async fn generate(
         )?;
     }
     crate::observe::export_file(root, &output, &model)?;
+    json_new(&output.join("generation.json"), &json!({"analysis_and_evidence_read_ns":analysis_ns,"render_write_and_trace_export_ns":generation_started.elapsed().as_nanos()-analysis_ns,"scope":"post-execution report preparation; excludes final report seal; not included in attempt measurements"}))?;
     crate::evidence::seal(&output)?;
     eprintln!("[eval] report: {}", output.display());
     Ok(output)

@@ -25,6 +25,11 @@ pub(crate) fn git_environment(command: &mut Command, workspace: &Path) {
 pub(crate) fn permissions(work: &Path, bundle: &Path, moon_home: &Path) -> Result<toml::Value> {
     let mut filesystem = toml::Table::new();
     filesystem.insert(":minimal".into(), "read".into());
+    let worker_address = work.join("worker-socket.json");
+    if worker_address.exists() {
+        let socket: String = serde_json::from_slice(&fs::read(worker_address)?)?;
+        filesystem.insert(socket, "write".into());
+    }
     // Bubblewrap re-enters this binary to apply seccomp before the task starts.
     // Native tool execution and `codex sandbox` do not add this readable path
     // automatically. Expose the executable, never the bundle or checkout root.
@@ -38,6 +43,7 @@ pub(crate) fn permissions(work: &Path, bundle: &Path, moon_home: &Path) -> Resul
         moon_home.join("lib"),
         bundle.join("moon-home/registry"),
         bundle.join("dependencies"),
+        bundle.join("reference"),
         Path::new("/opt/homebrew").into(),
         Path::new("/opt/local").into(),
     ] {
@@ -130,6 +136,30 @@ pub(crate) async fn prepare(workspace: &Path, home: &Path, path: &str) -> Result
     Ok(
         json!({"git_root":root,"baseline_commit":lines.next().context("baseline commit")?,"preparation_ns":started.elapsed().as_nanos() as u64,"global_and_system_config":false}),
     )
+}
+
+/// Copy the sealed fixture and its precomputed Git baseline. Copies are writable
+/// and never share mutable inodes with the template or the other treatment arm.
+pub(crate) fn instantiate(template: &Path, workspace: &Path) -> Result<Value> {
+    let start = std::time::Instant::now();
+    for entry in walkdir::WalkDir::new(template).follow_links(false) {
+        let entry = entry?;
+        let relative = entry.path().strip_prefix(template)?;
+        if relative.as_os_str().is_empty() || relative == Path::new("seal.json") || relative == Path::new("baseline.json") { continue; }
+        ensure!(!entry.file_type().is_symlink(),"symlink in workspace template");
+        let target = workspace.join(relative);
+        if entry.file_type().is_dir() { fs::create_dir_all(target)?; }
+        else {
+            fs::copy(entry.path(),&target)?;
+            #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; fs::set_permissions(target,fs::Permissions::from_mode(0o644))?; }
+        }
+    }
+    let mut facts = crate::evidence::read_json(&template.join("baseline.json"))?;
+    facts["git_root"] = json!(workspace.canonicalize()?);
+    facts["template_preparation_ns"] = facts["preparation_ns"].take();
+    facts["preparation_ns"] = json!(start.elapsed().as_nanos() as u64);
+    facts["baseline_reused"] = json!(true);
+    Ok(facts)
 }
 
 #[cfg(test)]

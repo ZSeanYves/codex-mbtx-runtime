@@ -14,6 +14,7 @@ use tokio::process::ChildStdout;
 use tokio::process::Command;
 
 pub(crate) struct Analysis {
+    pub fingerprint: String,
     child: Child,
     input: ChildStdin,
     output: BufReader<ChildStdout>,
@@ -33,6 +34,7 @@ impl Analysis {
         let input = child.stdin.take().context("analysis stdin")?;
         let output = BufReader::new(child.stdout.take().context("analysis stdout")?);
         Ok(Self {
+            fingerprint: crate::evidence::digest(&[std::fs::read(bundle.join("evaluation-model.wasm"))?,std::fs::read(std::env::current_exe()?)?].concat()),
             child,
             input,
             output,

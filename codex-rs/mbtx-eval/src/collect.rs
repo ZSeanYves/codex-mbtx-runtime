@@ -27,6 +27,7 @@ use crate::gate::Gate;
 use crate::gate::Route;
 use crate::replay;
 use crate::report;
+use crate::scheduling::schedule;
 
 #[derive(Args)]
 pub(crate) struct RunArgs {
@@ -36,7 +37,7 @@ pub(crate) struct RunArgs {
     pub output: PathBuf,
     #[arg(long, value_parser=["replay","relay"],default_value="replay")]
     pub mode: String,
-    #[arg(long,value_parser=["pilot","programs","workflow"],default_value="pilot")]
+    #[arg(long,value_parser=["pilot","programs","workflow","long-study","long-pilot"],default_value="pilot")]
     pub suite: String,
     #[arg(long, default_value = "mbtx/config/relay.toml")]
     pub config: PathBuf,
@@ -67,23 +68,12 @@ pub(crate) struct RunArgs {
     /// Controlled offline failure; never combined with a real provider.
     #[arg(long,value_parser=["429","500","disconnect","truncated","stall"],conflicts_with="replay_source")]
     pub replay_fault: Option<String>,
-}
-
-fn schedule(tasks: &[Value], repeats: usize, seed: u64) -> Vec<Value> {
-    let mut order: Vec<_> = (0..tasks.len()).collect();
-    let mut state = seed;
-    for i in (1..order.len()).rev() {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        order.swap(i, (state % (i as u64 + 1)) as usize);
-    }
-    let mut pairs = Vec::new();
-    for repeat in 0..repeats {
-        for (rank, &index) in order.iter().enumerate() {
-            let n = pairs.len();
-            pairs.push(json!({"pair_id":format!("pair-{n:04}"),"task_id":tasks[index]["id"],"family":tasks[index]["family"],"scenario":tasks[index]["scenario"],"variant":tasks[index]["variant"],"repeat":repeat,"arms":if (rank+repeat)%2==0 { ["shell_tool","mbtx_program"] } else { ["mbtx_program","shell_tool"] }}));
-        }
-    }
-    pairs
+    /// Controlled decision prefix for offline step, resource and cache validation.
+    #[arg(long, default_value_t = 0)]
+    pub replay_prefix_turns: usize,
+    /// Minimum retains audit evidence; full additionally captures native OTLP.
+    #[arg(long,default_value="full",value_parser=["full","minimal"])]
+    pub observation: String,
 }
 
 fn route(
@@ -114,6 +104,8 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         "pilot collection currently supports Linux and macOS only"
     );
     ensure!(args.batch_pairs != Some(0), "batch-pairs must be positive");
+    ensure!(args.mode=="replay" || args.observation=="full","minimal observation is an offline calibration condition only");
+    ensure!(args.replay_prefix_turns <= 256 && (args.replay_prefix_turns == 0 || (args.mode == "replay" && args.replay_source.is_none() && args.replay_fault.is_none())),"decision prefix is available only for fixed offline replay");
     ensure!((1..=86400).contains(&args.max_wall_seconds), "max-wall-seconds must be 1..86400");
     ensure!(
         args.mode != "relay" || args.min_interval_ms >= 15000,
@@ -235,6 +227,8 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                 && previous["mode"] == args.mode
                 && previous["min_interval_ms"] == args.min_interval_ms
                 && previous["max_wall_seconds"] == args.max_wall_seconds
+                && previous["replay_prefix_turns"].as_u64().unwrap_or(0) == args.replay_prefix_turns as u64
+                && previous["observation"].as_str().unwrap_or("full") == args.observation
                 && previous["schedule"] == json!(expected_schedule)
                 && previous["protocol"] == protocol
                 && previous["path"] == path
@@ -263,6 +257,8 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                 fs::create_dir_all(file.parent().context("fixture parent")?)?;
                 write_new(&file, content.as_str().context("fixture text")?.as_bytes())?;
             }
+            let baseline = crate::workspace::prepare(&directory,&directory,&path).await?;
+            json_new(&directory.join("baseline.json"),&baseline)?;
             seal(&directory)?;
         }
         let fixture_seals = crate::evidence::hashes(&args.output.join("fixtures"))?;
@@ -271,6 +267,8 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         manifest["path"] = json!(path);
         manifest["utilities"] = json!(utilities);
         manifest["max_wall_seconds"] = json!(args.max_wall_seconds);
+        manifest["replay_prefix_turns"] = json!(args.replay_prefix_turns);
+        manifest["observation"] = json!(args.observation);
         json_new(&args.output.join("run.json"), &manifest)?;
         write_new(
             &args.output.join("run.sha256"),
@@ -396,7 +394,7 @@ async fn collect_schedule(
             } else if let Some(fault) = &args.replay_fault {
                 Some(vec![replay::fault(fault)])
             } else if args.mode == "replay" {
-                Some(replay::fixed(task, arm)?)
+                Some(replay::fixed(task, arm,args.replay_prefix_turns)?)
             } else {
                 None
             };
@@ -417,6 +415,13 @@ async fn collect_schedule(
                 "[eval] {} status={} steps={}",
                 id, assessment["status"], assessment["accounting"]["metrics"]["agent_steps"]
             );
+            {
+                use std::io::Write;
+                let mut file=fs::OpenOptions::new().create(true).append(true).open(root.join("progress.jsonl"))?;
+                serde_json::to_writer(&mut file,&json!({"attempt_id":id,"pair_id":pair["pair_id"],"arm":arm,"status":assessment["status"],"comparable":assessment["status"]=="success" && assessment["integrity"]==true && assessment["accounting"]["coverage"]["steps"]==true}))?;
+                file.write_all(b"\n")?;
+                file.sync_all()?;
+            }
             completed.push(assessment);
         }
     }
@@ -452,7 +457,7 @@ async fn probe(root: &Path, config: &RelayConfig, gate: &Arc<Gate>) -> Result<bo
                 match response.text().await {
                     Ok(body) => {
                         let success = status.is_success()
-                            && report::response_terminal(&body) == Some("completed");
+                            && report::response_summary(&body).0 == Some("completed");
                         let detail = if success {
                             None
                         } else {

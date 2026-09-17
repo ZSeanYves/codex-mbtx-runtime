@@ -95,6 +95,7 @@ pub(crate) struct AttemptContext<'a> {
     pub attempt_id: &'a str,
     pub instructions: &'a str,
     pub work: &'a Path,
+    pub evidence: &'a Path,
 }
 
 pub(crate) fn child_config(
@@ -109,6 +110,7 @@ pub(crate) fn child_config(
         attempt_id,
         instructions,
         work,
+        evidence,
     } = context;
     let provider = config.provider()?;
     let mbtx = arm == "mbtx_program";
@@ -131,6 +133,8 @@ pub(crate) fn child_config(
         bundle.join("models.json").to_string_lossy().as_ref().into(),
     );
     value.insert("tool_output_token_limit".into(), 4096.into());
+    let socket: String = serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
+    value.insert("shell_environment_policy".into(), toml::Value::try_from(serde_json::json!({"set":{"MBTX_WORKER_SOCKET":socket}}))?);
     value.insert("project_doc_max_bytes".into(), 0.into());
     value.insert("project_root_markers".into(), toml::Value::Array(vec![]));
     value.insert("allow_login_shell".into(), false.into());
@@ -200,6 +204,9 @@ pub(crate) fn child_config(
             ("enabled", toml::Value::from(mbtx)),
             ("moon", moon.into()),
             ("moonrun", moonrun.into()),
+            ("reference_directory", bundle.join("reference").to_string_lossy().as_ref().into()),
+            ("output_directory", evidence.join("resources").to_string_lossy().as_ref().into()),
+            ("observation_socket", socket.into()),
             (
                 "dependency_cache",
                 bundle

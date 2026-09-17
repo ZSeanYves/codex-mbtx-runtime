@@ -137,6 +137,8 @@ pub(crate) fn snapshot(workspace: &Path, task: &Value) -> Result<Value> {
         .cloned()
         .collect();
     names.push(task["output"].as_str().context("task output")?.to_owned());
+    names.extend(task["expected_outputs"].as_object().into_iter().flat_map(|m| m.keys().cloned()));
+    names.extend(task["absent_outputs"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_owned)));
     names.sort();
     names.dedup();
     for name in names {
@@ -160,4 +162,9 @@ pub(crate) fn snapshot(workspace: &Path, task: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"files":files,"errors":errors}))
+}
+
+pub(crate) fn worker_events(evidence: &Path) -> Result<Value> {
+    Ok(serde_json::to_value(fs::read_to_string(evidence.join("worker-events.jsonl"))?.lines()
+        .map(serde_json::from_str::<Value>).collect::<std::result::Result<Vec<_>, _>>()?)?)
 }
