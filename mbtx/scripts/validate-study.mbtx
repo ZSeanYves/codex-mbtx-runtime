@@ -19,7 +19,7 @@ async fn main {
   let root="_build/study-validation/run-\{@env.now()}"
   // Exercise the public entry point and detect common setup failures after one
   // pair, before continuing the remaining scenario coverage.
-  let command=["run","mbtx/scripts/collect-study.mbtx","replay","--output",root,"--variants","1","--repeats","1","--min-interval-ms","0","--batch-pairs","1"]
+  let command=["run","mbtx/scripts/collect-study.mbtx","replay","--suite","programs","--output",root,"--variants","1","--repeats","1","--min-interval-ms","0","--batch-pairs","1"]
   @shell.Cmd("moon",command,env={"MBTX_BUNDLE":bundle}).run()
   let seals : Map[String,String] = Map([])
   @fs.walk(root+"/attempts",max_concurrency=1,(path,files)=> {

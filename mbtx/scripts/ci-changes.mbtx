@@ -17,7 +17,7 @@ async fn main {
     Some(base) => {
       let diff = @shell.Cmd("git",["diff","--name-only",base,"HEAD"]).output()
       guard diff.exit_code() == 0 else {fail("git diff failed")}
-      diff.stdout().split("\n").any(path => !path.has_suffix(".md") && (path.has_prefix("mbtx/") || path.has_prefix("codex-rs/") || path == ".github/workflows/mbtx.yml"))
+      diff.stdout().split("\n").any(path => path.has_prefix("mbtx/reference/") || (!path.has_suffix(".md") && (path.has_prefix("mbtx/") || path.has_prefix("codex-rs/") || path == ".github/workflows/mbtx.yml")))
     }
     None => true
   }

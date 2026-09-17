@@ -17,7 +17,8 @@ async fn main {
   let platform=@shell.Cmd("uname",["-s"]).output().stdout().trim().to_owned()
   if args[1]=="relay" && platform!="Linux" {fail("The current online study protocol requires Linux")}
   let command=["run","--bundle",bundle,"--mode",args[1]]
-  if !args.contains("--suite") {command.append(["--suite","programs"])}
+  if !args.contains("--suite") {command.append(["--suite","long-study"])}
+  if !args.contains("--batch-pairs") {command.append(["--batch-pairs","10"])}
   if !args.contains("--output") {
     guard !args.contains("--resume") else {fail("--resume requires the original --output RUN directory")}
     let output="_build/programmable-study/"+platform+"/"+args[1]+"/run-\{@env.now()}"
