@@ -35,7 +35,7 @@ fn long_release(extended : Bool, variant : Int) -> LongCase {
   let base = long_plain({
     goal: "Reconcile the release directory with release-plan.json. For each target, select candidates matching the requested version, verify their actual SHA-256 bytes using ./fixture-worker hash PATH, then choose greatest priority among hash-valid candidates (lexically smallest path breaks ties). Priority never overrides invalid content or a wrong version. Keep targets whose actual hash is already correct, repair missing/corrupt targets by copying the selected candidate, remove only the explicitly listed obsolete paths, and preserve candidate inputs. Rehash all final targets. Write identical manifest.json and result.json containing version, files sorted by target path with actual sha256 and selected source, removed paths, and repaired paths. This is a final-state oracle plus content verification; a self-reported success flag is insufficient.",
     schema: "{version:string,files:[{path:string,sha256:string,source:string}],removed:string[],repaired:string[]}", files, expected,
-    reference: #|: > release-results.jsonl
+    reference: (#|: > release-results.jsonl
                #|: > repaired.txt
                #|jq -c '.artifacts|sort_by(.target)[]' release-plan.json | while IFS= read -r row; do
                #| target=$(printf '%s' "$row" | jq -r .target); expected=$(printf '%s' "$row" | jq -r .sha256); version=$(jq -r .version release-plan.json)
@@ -51,6 +51,7 @@ fn long_release(extended : Bool, variant : Int) -> LongCase {
                #|jq -s --slurpfile p release-plan.json --slurpfile r repaired.json '{version:$p[0].version,files:sort_by(.path),removed:($p[0].obsolete|sort),repaired:($r[0]|sort)}' release-results.jsonl > result.json
                #|cp result.json manifest.json
                #|
+    ),
   })
   { ..base, outputs, mutable_inputs: mutable, absent: ["release/obsolete.txt"] }
 }

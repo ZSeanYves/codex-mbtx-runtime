@@ -71,10 +71,12 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
       None => false
     })
   })
+  let worker_records : Array[Json] = @json.from_json(field(field(facts,"snapshot"),"worker_events")) catch { _ => [] }
   let status = if field(facts, "execution_error") != Json::null() ||
     field(facts, "integrity") == false.to_json() ||
     field(validation, "status") == Json::string("harness_error") ||
-    exchanges.any(item => field(item, "evidence_error") == true.to_json()) {
+    exchanges.any(item => field(item, "evidence_error") == true.to_json()) ||
+    worker_records.any(item => field(item,"evidence_error") != Json::null()) {
     "harness_error"
   } else if outcome == Json::null() {
     "censored"
@@ -94,7 +96,8 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     field(outcome, "exit_code") != (0).to_json() {
     "harness_error"
   } else if field(oracle, "success") == true.to_json() &&
-    field(outcome, "exit_code") == (0).to_json() {
+    field(outcome, "exit_code") == (0).to_json() &&
+    (field(task,"cohort") == Json::null() || field(trace,"status") == Json::string("completed")) {
     "success"
   } else if field(oracle, "success") == false.to_json() {
     "task_failure"
@@ -107,6 +110,8 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     "task_id": field(task, "id"),
     "arm": field(facts, "arm"),
     "status": status.to_json(),
+    "execution_terminal": field(outcome,"termination"),
+    "session_terminal": field(trace,"status"),
     "steps_to_success": if status == "success" &&
       field(field(accounting, "coverage"), "steps") == true.to_json() {
       field(field(accounting, "metrics"), "agent_steps")
@@ -120,6 +125,9 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
     "workspace": field(facts, "workspace"),
     "family": field(task, "family"),
     "scenario": field(task, "scenario"),
+    "cohort": field(task,"cohort"),
+    "complexity": field(task,"complexity"),
+    "cohort_complexity": if field(task,"cohort") != Json::null() { (string_field(task,"cohort") + "/" + string_field(task,"complexity")).to_json() } else { Json::null() },
     "variant": field(task, "variant"),
     "acceptance": field(task, "acceptance"),
     "accounting": accounting,
@@ -129,6 +137,7 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
       complete=field(field(accounting, "coverage"), "tool_results") ==
         true.to_json(),
     ),
+    "timing": attempt_timing(facts),
     "upstream_requests_observed": exchanges
     .filter(e => {
       field(field(e, "headers"), "send_ns") != Json::null() ||
@@ -231,7 +240,9 @@ pub fn analyze_experiment(
   let schedule : Array[Json] = @json.from_json(field(manifest, "schedule"))
   let formal = field(field(manifest, "protocol"), "suite") ==
     Json::string("programs") ||
-    field(field(manifest, "protocol"), "suite") == Json::string("workflow")
+    field(field(manifest, "protocol"), "suite") == Json::string("workflow") ||
+    field(field(manifest,"protocol"),"suite") == Json::string("long-study")
+  let long = field(field(manifest,"protocol"),"suite") == Json::string("long-study") || field(field(manifest,"protocol"),"suite") == Json::string("long-pilot")
   let pairs : Array[Json] = []
   let by_arm : Map[String, Json] = Map([])
   for arm in ["shell_tool", "mbtx_program"] {
@@ -245,7 +256,15 @@ pub fn analyze_experiment(
       statuses[status] = statuses.get(status).unwrap_or(0) + 1
     }
     let curve : Array[Json] = []
-    for budget in [1, 2, 4, 8, 12] {
+    let thresholds : Array[Int] = []
+    for a in selected {
+      if comparable(a) {
+        let value : Int? = nullable(field(field(field(a,"accounting"),"metrics"),"agent_steps")) catch { _ => None }
+        if value is Some(value) && !thresholds.contains(value) { thresholds.push(value) }
+      }
+    }
+    thresholds.sort()
+    for budget in thresholds {
       let count = selected
         .filter(a => {
           if !comparable(a) {
@@ -260,7 +279,7 @@ pub fn analyze_experiment(
         })
         .length()
       curve.push({
-        "budget": budget.to_json(),
+        "observed_step_threshold": budget.to_json(),
         "successes": count.to_json(),
         "denominator": schedule.length().to_json(),
       })
@@ -271,6 +290,9 @@ pub fn analyze_experiment(
       "not_started": (schedule.length() - selected.length()).to_json(),
       "statuses": statuses.to_json(),
       "successes": success.to_json(),
+      "started_denominator": selected.length().to_json(),
+      "started_success_rate": if selected.is_empty() { Json::null() } else { (success.to_double()/selected.length().to_double()).to_json() },
+      "assigned_success_rate": if schedule.is_empty() { Json::null() } else { (success.to_double()/schedule.length().to_double()).to_json() },
       "external_failures": selected
       .filter(a => {
         field(a, "status") == Json::string("relay_error") ||
@@ -282,7 +304,7 @@ pub fn analyze_experiment(
       .filter(a => infrastructure(field(a, "status")))
       .length()
       .to_json(),
-      "success_by_step_budget": curve.to_json(),
+      "cumulative_success_by_observed_steps": curve.to_json(),
     }
   }
   for pair in schedule {
@@ -329,6 +351,9 @@ pub fn analyze_experiment(
       "task_id": field(pair, "task_id"),
       "family": field(pair, "family"),
       "scenario": field(pair, "scenario"),
+      "cohort": field(pair,"cohort"),
+      "complexity": field(pair,"complexity"),
+      "cohort_complexity": if long { (string_field(pair,"cohort") + "/" + string_field(pair,"complexity")).to_json() } else { Json::null() },
       "variant": field(pair, "variant"),
       "repeat": field(pair, "repeat"),
       "workspace_baseline_equal": baseline_equal,
@@ -358,7 +383,14 @@ pub fn analyze_experiment(
         None => Json::null()
       },
       "step_difference_mbtx_minus_shell": difference,
+      "step_ratio_mbtx_over_shell": if difference != Json::null() {
+        let shell : Double = @json.from_json(field(field(field(a.unwrap(),"accounting"),"metrics"),"agent_steps"))
+        let mbtx : Double = @json.from_json(field(field(field(b.unwrap(),"accounting"),"metrics"),"agent_steps"))
+        if shell > 0 { (mbtx / shell).to_json() } else { Json::null() }
+      } else { Json::null() },
+      "semantic_step_alignment": Json::null(),
       "first_divergence": divergence,
+      "divergence_interpretation": "Ordinal trace difference only; steps are not semantically aligned and this is not causal attribution",
       "attempt_ids": members.map(a => field(a, "attempt_id")).to_json(),
     })
   }
@@ -374,7 +406,7 @@ pub fn analyze_experiment(
   }
   {
     "schema_version": 1,
-    "analysis_version": "programmable-steps-v3",
+    "analysis_version": "programmable-long-analysis-v1",
     "run_id": field(manifest, "run_id"),
     "mode": field(manifest, "mode"),
     "platform": field(manifest, "platform"),
@@ -390,7 +422,9 @@ pub fn analyze_experiment(
     "partial": (attempts.length() != schedule.length() * 2 ||
     attempts.any(a => field(a, "status") == Json::string("censored"))).to_json(),
     "itt": by_arm.to_json(),
-    "conditional": if formal {
+    "conditional": if long {
+      {"pairs":deltas.length().to_json(),"mean_step_difference":Json::null(),"confidence_interval":Json::null(),"interval_reason":"Workflow and program-delivery cohorts are analyzed separately in by_cohort; no pooled treatment estimate"}
+    } else if formal {
       study_uncertainty(pairs)
     } else {
       {
@@ -409,6 +443,8 @@ pub fn analyze_experiment(
     } else {
       []
     },
+    "by_cohort": if long { study_strata(pairs,attempts,"cohort",intervals=formal) } else { [] },
+    "by_complexity": if long { study_strata(pairs,attempts,"cohort_complexity",intervals=formal) } else { [] },
     "by_scenario": if formal {
       study_strata(pairs, attempts, "scenario")
     } else {

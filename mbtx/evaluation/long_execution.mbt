@@ -28,10 +28,11 @@ fn long_jobs(extended : Bool, variant : Int) -> LongCase {
     schema: "{completed:[{id:string,result:integer}],skipped:string[],total:integer}",
     files: {"jobs.json":({"jobs":jobs.to_json()}:Json).stringify().to_json()},
     expected: {"completed":completed.to_json(),"skipped":["job-disabled"],"total":total.to_json()},
-    reference: #|jq -r '.jobs|sort_by(.id)[]|select(.enabled)|.id' jobs.json > order.txt
+    reference: (#|jq -r '.jobs|sort_by(.id)[]|select(.enabled)|.id' jobs.json > order.txt
                #|while IFS= read -r id; do if ./fixture-worker job jobs.json "$id"; then :; else code=$?; test "$code" -eq 7; ./fixture-worker job jobs.json "$id"; fi; done < order.txt
                #|jq -s --slurpfile plan jobs.json '{completed:(sort_by(.id)|map({id,result})),skipped:([$plan[0].jobs[]|select(.enabled|not)|.id]|sort),total:([.[].result]|add)}' state/*.json > result.json
                #|
+    ),
   })
   { ..base, outputs, worker_events: events, absent: ["state/job-disabled.json"] }
 }
@@ -73,7 +74,7 @@ fn long_recovery(extended : Bool, variant : Int) -> LongCase {
     goal: "Recover records.json using committed state and checkpoint.json. Deduplicate by id, selecting greatest generation (duplicates at a generation are identical). A committed state is valid only when id, generation and squared result match the selected record. The checkpoint is only a hint and may overclaim completion. Keep valid committed state without re-executing its record. For every missing or invalid state, invoke ./fixture-worker recover records.json ID, check success, then verify its committed JSON. The worker selects the latest generation and squares value. Remove stale *.pending files. Rebuild checkpoint.json with sorted completed IDs and the maximum selected generation. Write result.json with all sorted states, total result and IDs that required execution. Do not edit records.json or fabricate worker output. Verify that a second recovery pass would schedule no work; do not re-execute already valid records. Worker invocations are independently recorded.",
     schema: "{completed:[{id:string,generation:integer,result:integer}],total:integer,executed:string[]}", files,
     expected: {"completed":completed.to_json(),"total":total.to_json(),"executed":ids[1:].to_owned().to_json()},
-    reference: #|jq '.records|sort_by(.id,.generation)|group_by(.id)|map(last)' records.json > selected.json
+    reference: (#|jq '.records|sort_by(.id,.generation)|group_by(.id)|map(last)' records.json > selected.json
                #|: > executed.txt
                #|jq -r '.[].id' selected.json | while IFS= read -r id; do
                #| expected=$(jq -c --arg id "$id" '.[]|select(.id==$id)|{id,generation,result:(.value*.value)}' selected.json)
@@ -84,6 +85,7 @@ fn long_recovery(extended : Bool, variant : Int) -> LongCase {
                #|jq -Rn '[inputs]' executed.txt > executed.json
                #|jq -s --slurpfile e executed.json '{completed:sort_by(.id),total:([.[].result]|add),executed:$e[0]}' state/*.json > result.json
                #|
+    ),
   })
   { ..base, outputs, mutable_inputs: mutable, absent: ["state/record-2.pending"], worker_events: events }
 }
@@ -109,13 +111,14 @@ fn long_forensics(extended : Bool, variant : Int) -> LongCase {
     goal: "Run ./fixture-worker emit streams.json and preserve its complete separate stdout/stderr bytes in stdout.log and stderr.log. Large previews are insufficient evidence of completeness. Parse the emitted JSONL records. For each ERROR, retain exactly its preceding/current/following record in that stream, preserving per-stream order. Report record counts, full last records (including Unicode), and findings. Verify the saved logs exactly match their corresponding immutable .input files, including trailing newlines. Do not merge streams or sort away their order. Write result.json with stdout first, then stderr. The emitting worker must actually run and is independently observed.",
     schema: "{streams:[{stream:string,records:integer,tail:object,findings:[{seq:integer,context:object[]}]}]}", files,
     expected: {"streams":summaries.to_json()},
-    reference: #|./fixture-worker emit streams.json > stdout.log 2> stderr.log
+    reference: (#|./fixture-worker emit streams.json > stdout.log 2> stderr.log
                #|cmp stdout.input stdout.log
                #|cmp stderr.input stderr.log
                #|jq -s --arg stream stdout '. as $rows | {stream:$stream,records:length,tail:last,findings:[to_entries[]|select(.value.level=="ERROR")|.key as $i|{seq:.value.seq,context:$rows[$i-1:$i+2]}]}' stdout.log > stdout-summary.json
                #|jq -s --arg stream stderr '. as $rows | {stream:$stream,records:length,tail:last,findings:[to_entries[]|select(.value.level=="ERROR")|.key as $i|{seq:.value.seq,context:$rows[$i-1:$i+2]}]}' stderr.log > stderr-summary.json
                #|jq -s '{streams:.}' stdout-summary.json stderr-summary.json > result.json
                #|
+    ),
   })
   { ..base, outputs, worker_events: [{"action":"emit","id":Json::null(),"exit_code":0}] }
 }

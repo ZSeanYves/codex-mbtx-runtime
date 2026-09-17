@@ -31,6 +31,17 @@ test "oracle rejects a plausible wrong answer and modified inputs" {
 }
 
 ///|
+test "worker observation failure is a harness failure even if final artifacts match" {
+  let task : Json = {"id":"t","files":{},"output":"result.json","expected":42}
+  let report = @evaluation.analyze_attempt(task, {
+    "trace":Json::null(),"integrity":true,"exchanges":[],
+    "outcome":{"termination":"exited","exit_code":0},
+    "snapshot":{"files":{"result.json":"42"},"errors":[],"worker_events":[{"evidence_error":"recorder IO failure"}]},
+  })
+  guard report is {"status":String("harness_error"),"oracle":{"success":True,..},"steps_to_success":Null,..} else {fail(report.stringify())}
+}
+
+///|
 test "relay error preserves successful oracle without becoming an MBTX error" {
   guard @evaluation.pilot_protocol() is { "tasks": Array(tasks), .. } else {
     fail("tasks")

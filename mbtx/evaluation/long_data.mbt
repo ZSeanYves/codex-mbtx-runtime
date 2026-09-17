@@ -40,7 +40,7 @@ fn long_reconciliation(extended : Bool, variant : Int) -> LongCase {
     goal: "Reconcile transactions from source.jsonl and source.csv using accounts.json. CSV is unquoted UTF-8 with the supplied header and no embedded commas/newlines. Normalize integer amount and revision. Reject malformed records, unknown accounts/currencies, nonpositive invoice amounts and nonnegative refunds. Select one valid record per id by greatest revision, breaking ties by source_key in Unicode code-point lexical order (greatest wins); mark the other valid records superseded. After selection, accept a refund only if its reference identifies a selected invoice for the same account; otherwise reject it as missing_invoice. Convert accepted amounts using the integer base-currency rates. Write ledger.json sorted by id, rejected.json sorted by source_key with reason invalid/superseded/missing_invoice, and result.json including per-account totals (including zero) and overall total. Preserve original records and verify reconciliation totals.",
     schema: "{ledger:[{id:string,account:string,base_amount:integer,kind:string}],totals:{account:integer},total:integer,rejected:[{source_key:string,reason:string}]}",
     files: {"source.jsonl":(json_lines.join("\n") + "\n").to_json(),"source.csv":csv.to_string().to_json(),"accounts.json":({"accounts":["alpha","beta"],"rates":{"USD":1,"EUR":2}}:Json).stringify().to_json()}, expected,
-    reference: #|jq -Rn '[inputs|split(",")] | .[0] as $h | [.[1:][] | . as $v | reduce range(0;($h|length)) as $i ({}; .[$h[$i]]=$v[$i])]' source.csv > csv-normalized.json
+    reference: (#|jq -Rn '[inputs|split(",")] | .[0] as $h | [.[1:][] | . as $v | reduce range(0;($h|length)) as $i ({}; .[$h[$i]]=$v[$i])]' source.csv > csv-normalized.json
                #|jq -s '.' source.jsonl > json-normalized.json
                #|jq -n --slurpfile c accounts.json --slurpfile a csv-normalized.json --slurpfile b json-normalized.json '
                #| $c[0] as $cfg | ($a[0]+$b[0] | map(.amount=(try (.amount|tonumber) catch null) | .revision=(try (.revision|tonumber) catch null))) as $all |
@@ -52,6 +52,7 @@ fn long_reconciliation(extended : Bool, variant : Int) -> LongCase {
                #|jq '.ledger' result.json > ledger.json
                #|jq '.rejected' result.json > rejected.json
                #|
+    ),
   })
   { ..base, outputs: {"ledger.json":ledger.to_json(),"rejected.json":rejected.to_json()} }
 }
@@ -85,9 +86,10 @@ fn long_incident(extended : Bool, variant : Int) -> LongCase {
     schema: "{incidents:[{request:string,status:string,attempts:integer,cause:string,evidence:integer[]}],failed:integer,recovered:integer}",
     files: {"requests.json":requests.to_json().stringify().to_json(),"configurations.json":({"short":{"timeout_ms":200},"normal":{"timeout_ms":2000}}:Json).stringify().to_json(),"app.jsonl":(app.map(e=>e.stringify()).join("\n")+"\n").to_json(),"retries.jsonl":(retry.map(e=>e.stringify()).join("\n")+"\n").to_json()},
     expected: {"incidents":incidents.to_json(),"failed":(n/2).to_json(),"recovered":(n/2).to_json()},
-    reference: #|jq -s 'unique_by(.request,.seq)' app.jsonl retries.jsonl > events-normalized.json
+    reference: (#|jq -s 'unique_by(.request,.seq)' app.jsonl retries.jsonl > events-normalized.json
                #|jq -n --slurpfile r requests.json --slurpfile c configurations.json --slurpfile e events-normalized.json '
                #| [$r[0][] as $r | [$e[0][]|select(.request==$r.id)]|sort_by(.seq) as $events | ($events|map(select(.code!="ok"))|first) as $first | {request:$r.id,status:(if $events[-1].code=="ok" then "recovered" else "failed" end),attempts:($events|map(.attempt)|unique|length),cause:(if $first.code=="timeout" then (if $c[0][$first.config].timeout_ms<$r.budget_ms then "configuration_timeout" else "deadline" end) elif $first.code=="upstream_502" then "upstream" else "unknown" end),evidence:[$events[].seq]}] | sort_by(.request) | {incidents:.,failed:([.[]|select(.status=="failed")]|length),recovered:([.[]|select(.status=="recovered")]|length)}' > result.json
                #|
+    ),
   })
 }

@@ -65,7 +65,7 @@ fn study_tree(pairs : Array[Json], level : Int) -> StudyNode raise {
 ///|
 /// Families are fixed strata. Resample paired scenarios, their input variants,
 /// and repetitions; a repetition is never promoted to an independent scenario.
-fn study_uncertainty(pairs : Array[Json]) -> Json raise {
+fn study_estimate(pairs : Array[Json]) -> Json raise {
   let comparable = pairs.filter(p => {
     field(p, "step_difference_mbtx_minus_shell") != Json::null()
   })
@@ -79,7 +79,7 @@ fn study_uncertainty(pairs : Array[Json]) -> Json raise {
   }
   let groups : Map[String, Array[Json]] = Map([])
   for pair in comparable {
-    let key = field(pair, "family").stringify()
+    let key = field(pair, "family").stringify() + "/" + field(pair,"complexity").stringify()
     let items = groups
       .get(key)
       .unwrap_or_else(() => {
@@ -124,7 +124,7 @@ fn study_uncertainty(pairs : Array[Json]) -> Json raise {
     "confidence_level": 0.95,
     "bootstrap_draws": 2000,
     "bootstrap_seed": 20260916,
-    "method": "Percentile bootstrap; fixed family strata, paired scenario/input/repetition resampling; equal weights at each level",
+    "method": "Percentile bootstrap; fixed category and complexity strata, paired scenario/input/repetition resampling; equal weights at each level",
     "interval_reason": if enough {
       "Conditional on successful pairs and observed benchmark coverage; no universal generalization"
     } else {
@@ -134,10 +134,26 @@ fn study_uncertainty(pairs : Array[Json]) -> Json raise {
 }
 
 ///|
+fn study_uncertainty(pairs : Array[Json]) -> Json raise {
+  let result = match study_estimate(pairs) { Object(v) => v; _ => abort("estimate") }
+  let ratios = pairs.map(p=>{
+    let copy = match p { Object(v)=>v.copy(); _=>Map([]) }
+    copy["step_difference_mbtx_minus_shell"] = field(p,"step_ratio_mbtx_over_shell")
+    Json::object(copy)
+  })
+  let ratio = study_estimate(ratios)
+  result["mean_step_ratio"] = field(ratio,"mean_step_difference")
+  result["ratio_confidence_interval"] = field(ratio,"confidence_interval")
+  result["ratio_definition"] = "MBTX accepted steps / Shell accepted steps; ratios below 1 favor MBTX, conditional on both successes"
+  Json::object(result)
+}
+
+///|
 fn study_strata(
   pairs : Array[Json],
   attempts : Array[Json],
   key : String,
+  intervals~ : Bool = true,
 ) -> Json raise {
   let labels : Map[String, Bool] = Map([])
   for pair in pairs {
@@ -171,10 +187,16 @@ fn study_strata(
         .to_json(),
       }
     }
+    let estimate : Map[String,Json] = @json.from_json(study_uncertainty(selected))
+    if !intervals {
+      estimate["confidence_interval"] = Json::null()
+      estimate["ratio_confidence_interval"] = Json::null()
+      estimate["interval_reason"] = "Independent pilot; descriptive estimates only, excluded from formal study"
+    }
     result.push({
       "name": name.to_json(),
       "itt": itt.to_json(),
-      "conditional": study_uncertainty(selected),
+      "conditional": estimate.to_json(),
     })
   }
   result.to_json()

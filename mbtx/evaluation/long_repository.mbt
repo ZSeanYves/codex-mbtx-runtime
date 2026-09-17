@@ -22,13 +22,14 @@ fn long_impact(extended : Bool, variant : Int) -> LongCase {
     goal: "Investigate the change set using components.json, changes.json and checks.json. Map each new and old path to its owning prefix, ignoring paths under excluded prefixes. Find directly changed components, then all transitive reverse dependencies. Produce deterministic dependency-first order (lexical ID ties). Attach each affected component's validation status and evidence locator, and list failed checks as blocked. For renames inspect both paths, even when the new path is excluded. Unaffected components and documentation-only changes must not be included.",
     schema: "{direct:string[],affected:string[],checks:[{component:string,status:string,evidence:string}],blocked:string[]}",
     files: {"components.json":({"components":components.to_json(),"excluded":["docs/","generated/"]}:Json).stringify().to_json(),"changes.json":changes.to_json().stringify().to_json(),"checks.json":checks.to_json().stringify().to_json()}, expected,
-    reference: #|jq -n --slurpfile c components.json --slurpfile d changes.json --slurpfile t checks.json '
+    reference: (#|jq -n --slurpfile c components.json --slurpfile d changes.json --slurpfile t checks.json '
                #| $c[0] as $cfg | $cfg.components as $nodes |
                #| [$d[0][] | (.path,.old_path // empty) | . as $p | select(all($cfg.excluded[]; . as $e | $p|startswith($e)|not)) | $nodes[] | select(.prefix as $q | $p|startswith($q)) | .id] | unique as $direct |
                #| (reduce range(0;($nodes|length)) as $i ($direct; . as $seen | (. + [$nodes[] | select(any(.deps[]; . as $d | $seen|index($d))) | .id]) | unique)) as $all |
                #| (reduce range(0;($nodes|length)) as $i ([]; . as $done | . + ([$nodes[] | select(.id as $id | ($all|index($id)) and ($done|index($id)|not)) | select(all(.deps[]; . as $dep | $done|index($dep))) | .id]|sort))) as $ordered |
                #| {direct:$direct,affected:$ordered,checks:[$ordered[] as $id | $t[0][] | select(.component==$id)],blocked:[$ordered[] as $id | $t[0][] | select(.component==$id and .status=="failed")|.component]}' > result.json
                #|
+    ),
   })
 }
 
@@ -44,12 +45,13 @@ fn long_migration(extended : Bool, variant : Int) -> LongCase {
     goal: "Migrate the selected inherited configuration in layers.json to schema version 2. Traverse parents before children; shallow-merge accepted keys while preserving unrelated keys and labels. timeout_s must be a nonnegative integer; convert it to timeout_ms and remove timeout_s. enabled accepts only booleans or strings true/false. retries must be a nonnegative integer. Reject each invalid assignment and keep the inherited value, then continue applying valid assignments. Sort rejections by layer and key. Write migrated.json, rejected.json and result.json. Verify that applying the v2 normalization again would make no change. Do not alter layers.json.",
     schema: "{config:object,rejected:[{layer:string,key:string,value:any}],applied_layers:string[]}",
     files: {"layers.json":({"selected":if extended { "final" } else { "service" },"layers":layers.to_json()}:Json).stringify().to_json()}, expected,
-    reference: #|jq 'def chain($id): . as $doc | $doc.layers[] | select(.id==$id) | . as $n | (if .parent==null then [] else $doc|chain($n.parent) end)+[$n];
+    reference: (#|jq 'def chain($id): . as $doc | $doc.layers[] | select(.id==$id) | . as $n | (if .parent==null then [] else $doc|chain($n.parent) end)+[$n];
                #| chain(.selected) as $layers | reduce $layers[] as $l ({config:{},rejected:[],applied_layers:[]}; .applied_layers += [$l.id] | reduce ($l.values|to_entries[]) as $e (.; if (($e.key=="timeout_s" or $e.key=="retries") and ($e.value|type!="number" or .<0 or floor!=.)) or ($e.key=="enabled" and ([$e.value]|inside([true,false,"true","false"])|not)) then .rejected += [{layer:$l.id,key:$e.key,value:$e.value}] else .config[$e.key]=$e.value end)) |
                #| .config |= (.schema_version=2 | .timeout_ms=(.timeout_s*1000) | del(.timeout_s) | .enabled=(.enabled==true or .enabled=="true")) | .rejected |= sort_by(.layer,.key)' layers.json > result.json
                #|jq '.config' result.json > migrated.json
                #|jq '.rejected' result.json > rejected.json
                #|
+    ),
   })
   { ..base, outputs: {"migrated.json":config,"rejected.json":rejected} }
 }
