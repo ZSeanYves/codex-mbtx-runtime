@@ -61,7 +61,7 @@ async fn main {
   let cli_key = fingerprint(rust.filter(p=>!p.has_prefix("codex-rs/mbtx-eval/")),versions)
   let adapter_key = fingerprint(rust,versions)
   let model_key = fingerprint(files.filter(p=>p.has_prefix("mbtx/evaluation/") || p.has_prefix("mbtx/cmd/") || p=="mbtx/moon.mod" || p=="mbtx/moon.lock"),tool_key)
-  let reference_key = fingerprint(files.filter(p=>p.has_prefix("mbtx/reference/")),tool_key)
+  let reference_key = fingerprint(files.filter(p=>p.has_prefix("mbtx/reference/") || p=="mbtx/scripts/validate-reference.mbtx"),tool_key)
   let key = fingerprint(["mbtx/scripts/prepare-evaluation.mbtx"],cli_key+adapter_key+model_key+reference_key+tool_key)
   let bundle = base+"/"+key
   let costs : Array[Json] = []
@@ -75,7 +75,7 @@ async fn main {
         "codex"=>"codex-rs/target/debug/codex"
         "adapter"=>"codex-rs/target/debug/mbtx-eval"
         "analysis"=>"mbtx/_build/wasm/release/build/cmd/evaluation-model/evaluation-model.wasm"
-        _=>"_build/reference-validation/build/wasm/release/build/single/single.wasm"
+        _=>"_build/reference-validation/build/examples.mbtx/wasm/release/build/single/single.wasm"
       }
       let products = if name=="adapter" { [product,"codex-rs/target/debug/mbtx-fixture-worker"] } else { [product] }
       let reused = if @fs.exists(stamp) {

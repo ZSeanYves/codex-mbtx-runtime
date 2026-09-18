@@ -122,7 +122,8 @@ impl Validator<'_> {
         fs::create_dir(work)?;
         let mut result = json!({"status":"captured","source":{"file":name,"sha256":digest(&bytes),"bytes":bytes.len()},"build":null,"cases":[],"scope":"post-submission validation; no model steps or relay calls","process_spawns":null});
         let build_work = work.join("compile");
-        let artifact = build_work.join("workspace/build/wasm/release/build/single/single.wasm");
+        let mut artifact = build_work.join("workspace/build").join(name)
+            .join("wasm/release/build/single/single.wasm");
         if arm == "mbtx_program" {
             for sub in ["workspace", "home", "tmp"] {
                 fs::create_dir_all(build_work.join(sub))?;
@@ -189,6 +190,9 @@ impl Validator<'_> {
             {
                 result["status"] = json!("build_failed");
                 return Ok(result);
+            }
+            if !artifact.try_exists()? {
+                artifact = build_work.join("workspace/build/wasm/release/build/single/single.wasm");
             }
             ensure!(
                 artifact.is_file(),

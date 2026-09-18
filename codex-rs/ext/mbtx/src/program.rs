@@ -366,24 +366,31 @@ pub(crate) async fn execute(
             return Ok(());
         }
         result.stage = "execution";
-        let artifact = target_dir
-            .join("wasm/release/build/single/single.wasm")
-            .map_err(|e| e.to_string())?;
         let compiled = if let Some(cached) = cached {
             cached
         } else {
-            if !fs
+            // Current MoonBit versions namespace standalone builds by source
+            // filename. Retain compatibility with the earlier flat layout.
+            let mut artifact = target_dir
+                .join("program.mbtx/wasm/release/build/single/single.wasm")
+                .map_err(|e| e.to_string())?;
+            let options = GetMetadataOptions { follow_symlinks: false };
+            let metadata = match fs.get_metadata(&artifact, options, sandbox).await {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    artifact = target_dir
+                        .join("wasm/release/build/single/single.wasm")
+                        .map_err(|e| e.to_string())?;
+                    fs
                 .get_metadata(
                     &artifact,
-                    GetMetadataOptions {
-                        follow_symlinks: false,
-                    },
+                    options,
                     sandbox,
                 )
                 .await
-                .map_err(|e| e.to_string())?
-                .is_file
-            {
+                }
+                result => result,
+            }.map_err(|e| e.to_string())?;
+            if !metadata.is_file {
                 return Err("compiler did not produce the expected regular Wasm artifact".into());
             }
             let bytes = fs

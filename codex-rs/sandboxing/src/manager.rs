@@ -3,7 +3,7 @@ use crate::bwrap::WSL1_BWRAP_WARNING;
 #[cfg(target_os = "linux")]
 use crate::bwrap::is_wsl1;
 use crate::landlock::CODEX_LINUX_SANDBOX_ARG0;
-use crate::landlock::create_linux_sandbox_command_args_for_permission_profile;
+use crate::landlock::create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets;
 use crate::policy_transforms::effective_permission_profile;
 use crate::policy_transforms::should_require_platform_sandbox;
 #[cfg(target_os = "windows")]
@@ -510,6 +510,18 @@ impl SandboxManager {
                     command.env = prepared.env;
                     command.managed_network = Some(prepared.sandbox_context);
                 }
+                // Passive IPC grants also apply without a managed IP proxy.
+                // Transport only explicit paths in that case, preserving the
+                // restricted network policy and its AF_UNIX-only seccomp mode.
+                let allow_unix_sockets = command
+                    .managed_network
+                    .as_ref()
+                    .filter(|_| !enforce_managed_network)
+                    .into_iter()
+                    .flat_map(|context| &context.allow_unix_sockets)
+                    .map(AbsolutePathBuf::from_absolute_path)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| SandboxTransformError::EnvironmentNetworkProxy(error.to_string()))?;
                 let managed_network =
                     enforce_managed_network.then(|| command.managed_network.unwrap_or_default());
                 #[cfg(target_os = "linux")]
@@ -521,13 +533,14 @@ impl SandboxManager {
                     managed_network.is_some(),
                     is_wsl1(),
                 )?;
-                let mut args = create_linux_sandbox_command_args_for_permission_profile(
+                let mut args = create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets(
                     argv,
                     pending.native_command_cwd.as_path(),
                     &pending.effective_permission_profile,
                     pending.native_sandbox_policy_cwd.as_path(),
                     use_legacy_landlock,
                     managed_network.as_ref(),
+                    &allow_unix_sockets,
                 );
                 let mut full_command = Vec::with_capacity(1 + args.len());
                 full_command.push(os_string_to_command_component(exe.as_os_str().to_owned()));
