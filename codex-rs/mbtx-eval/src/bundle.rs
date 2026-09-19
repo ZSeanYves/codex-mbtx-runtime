@@ -64,12 +64,26 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
         repo.join("codex-rs/target/debug/codex"),
         pending.join("codex"),
     )?;
+    // MoonRun's host PATH intentionally excludes general utilities. The Linux
+    // sandbox must resolve its existing launcher independently of that PATH.
+    #[cfg(target_os = "linux")]
+    {
+        fs::create_dir(pending.join("codex-resources"))?;
+        fs::copy(
+            which::which("bwrap").context("Linux evaluation requires bubblewrap")?,
+            pending.join("codex-resources/bwrap"),
+        )?;
+    }
     fs::copy(std::env::current_exe()?, pending.join("mbtx-eval"))?;
     fs::copy(
         repo.join("codex-rs/target/debug/mbtx-fixture-worker"),
         pending.join("fixture-worker"),
     )?;
     fs::copy(&moonrun, pending.join("moonrun"))?;
+    fs::copy(
+        repo.join("mbtx/fixtures/process-policy.mbtx"),
+        pending.join("process-policy.mbtx"),
+    )?;
     // Version resolution reads registry metadata even for a frozen build. Keep
     // that metadata immutable without exposing the user's MoonBit credentials.
     let registry = moon_home.join("registry/index");
@@ -80,12 +94,26 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
         fs::copy(registry.join(relative), target)?;
     }
     fs::create_dir(pending.join("reference"))?;
-    for name in ["moonbit.md", "shell.md", "tools.md", "examples.mbtx"] {
+    for name in [
+        "moonbit.md",
+        "shell.md",
+        "tools.md",
+        "examples.mbtx",
+        "syntax.md",
+        "files.md",
+        "collections.md",
+        "processes.md",
+        "process-examples.mbtx",
+    ] {
         fs::copy(
             repo.join("mbtx/reference").join(name),
             pending.join("reference").join(name),
         )?;
     }
+    fs::copy(
+        repo.join("codex-rs/ext/mbtx/src/example.mbtx"),
+        pending.join("reference/tool-example.mbtx"),
+    )?;
     fs::copy(
         repo.join("mbtx/_build/wasm/release/build/cmd/evaluation-model/evaluation-model.wasm"),
         pending.join("evaluation-model.wasm"),

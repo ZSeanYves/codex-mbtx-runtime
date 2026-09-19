@@ -39,7 +39,7 @@ fn independent_retry_limits_reach_both_arms_without_unbounded_fallback() -> Resu
     }
     let info =
         json!({"moon_home":root,"moon_path":root.join("moon"),"moonrun_path":root.join("moonrun")});
-    for (requests, streams) in [(0, 2), (2, 0), (5, 5)] {
+    for (requests, streams) in [(0, 2), (2, 0), (2, 2)] {
         let config = configuration(&root.join("relay.toml"), requests, streams)?;
         for arm in ["shell_tool", "mbtx_program"] {
             let text = child_config(
@@ -57,6 +57,10 @@ fn independent_retry_limits_reach_both_arms_without_unbounded_fallback() -> Resu
             )?;
             let child: toml::Value = toml::from_str(&text)?;
             assert_eq!(
+                child["features"]["unified_exec"].as_bool(),
+                Some(arm == "shell_tool")
+            );
+            assert_eq!(
                 json!({"requests":child["model_providers"]["local"]["request_max_retries"],
                     "streams":child["model_providers"]["local"]["stream_max_retries"],
                     "unbounded":child["features"]["unbounded_connection_retries"],
@@ -65,7 +69,7 @@ fn independent_retry_limits_reach_both_arms_without_unbounded_fallback() -> Resu
             );
         }
     }
-    for (requests, streams) in [(6, 0), (0, 6), (u64::MAX, 0)] {
+    for (requests, streams) in [(3, 0), (0, 3), (u64::MAX, 0)] {
         assert!(configuration(&root.join("relay.toml"), requests, streams).is_err());
     }
     Ok(())

@@ -101,13 +101,15 @@ impl Execution<'_> {
         )
         .await?;
         json_new(&work.join("worker-socket.json"), &json!(receipts.socket))?;
+        let runtime_policy =
+            crate::process_policy::prepare(task, &work, directory, bundle, &manifest["utilities"])?;
         let endpoint = format!("{}/a/{id}/v1", gate.endpoint);
         let instructions = manifest["protocol"]["instructions"]
             .as_str()
             .context("instructions")?;
         // Older frozen protocols have only the common instructions. Never
         // silently give a recorded run a newer submission contract on resume.
-        let instructions = match manifest["protocol"].get("arm_instructions") {
+        let mut instructions = match manifest["protocol"].get("arm_instructions") {
             Some(arms) if !arms.is_null() => format!(
                 "{instructions}\n\n{}",
                 arms[&route.arm]
@@ -116,6 +118,19 @@ impl Execution<'_> {
             ),
             _ => instructions.to_owned(),
         };
+        if task.get("required_source").is_some()
+            && let Some(source) = crate::submission_contract::required_source(task, &route.arm)?
+        {
+            instructions.push_str(&format!("\nThis task requires the exact saved source {source}. Temporary tool programs and correct visible artifacts do not replace this submission."));
+        }
+        let max_wall_seconds = manifest["max_wall_seconds"]
+            .as_u64()
+            .context("recorded attempt wall limit")?;
+        let start = Instant::now();
+        let cancellation = crate::cancellation::Cancellation::listen()?;
+        let wall_start = now_ms().context("attempt wall clock")?;
+        let deadline = start + Duration::from_secs(max_wall_seconds);
+        let v3 = task.get("process_allow").is_some();
         let mut toml = child_config(
             config,
             bundle,
@@ -129,6 +144,28 @@ impl Execution<'_> {
                 evidence: directory,
             },
         )?;
+        if v3 && route.arm == "mbtx_program" {
+            let mut value: toml::Value = toml::from_str(&toml)?;
+            let mbtx = value
+                .get_mut("mbtx")
+                .and_then(toml::Value::as_table_mut)
+                .context("MBTX config table")?;
+            mbtx.insert(
+                "attempt_deadline_unix_ms".into(),
+                ((wall_start + max_wall_seconds * 1000) as i64).into(),
+            );
+            if let Some(policy) = &runtime_policy {
+                mbtx.insert(
+                    "runtime_policy".into(),
+                    policy.path.to_string_lossy().as_ref().into(),
+                );
+                mbtx.insert(
+                    "execution_path".into(),
+                    policy.execution_path.as_str().into(),
+                );
+            }
+            toml = toml::to_string_pretty(&value)?;
+        }
         if manifest["observation"] == "minimal" {
             let mut value: toml::Value = toml::from_str(&toml)?;
             value["otel"]["exporter"] = "none".into();
@@ -173,22 +210,17 @@ impl Execution<'_> {
         crate::workspace::git_environment(&mut command, &workspace);
         #[cfg(unix)]
         command.process_group(0);
-        let start = Instant::now();
-        let wall_start = now_ms();
         let mut child = command.spawn().context("launch bundled Codex")?;
         let pid = child.id().context("Codex PID")?;
         json_new(
             &directory.join("process.json"),
-            &json!({"pid":pid,"pgid":pid,"wall_start_ms":wall_start,"clock_domain":format!("attempt-{id}-monotonic")}),
+            &json!({"pid":pid,"pgid":pid,"wall_start_ms":wall_start,"deadline_unix_ms":wall_start+max_wall_seconds*1000,"policy_sha256":runtime_policy.as_ref().map(|p|&p.sha256),"clock_domain":format!("attempt-{id}-monotonic")}),
         )?;
         let mut termination = "exited";
-        let max_wall_seconds = manifest["max_wall_seconds"]
-            .as_u64()
-            .context("recorded attempt wall limit")?;
         let status = tokio::select! {
             status=child.wait()=>status?,
-            _=tokio::time::sleep(Duration::from_secs(max_wall_seconds))=> {termination="wall_limit"; terminate(&mut child,pid).await?},
-            _=tokio::signal::ctrl_c()=> {termination="cancelled"; terminate(&mut child,pid).await?},
+            _=tokio::time::sleep_until(deadline.into())=> {termination="wall_limit"; terminate(&mut child,pid).await?},
+            _=cancellation.cancelled()=> {termination="cancelled"; terminate(&mut child,pid).await?},
         };
         let elapsed = start.elapsed().as_nanos() as u64;
         let wall_end = now_ms();
@@ -209,9 +241,14 @@ impl Execution<'_> {
         };
         #[cfg(not(unix))]
         let signal: Option<i32> = None;
+        let model_termination = termination;
         json_new(
-            &directory.join("outcome.json"),
-            &json!({"termination":termination,"exit_code":status.code(),"signal":signal,"elapsed_ns":elapsed,"wall_end_ms":wall_end,"pid":pid,"pair_id":pair,"shutdown_included":true,"collector_drain_ns":collector_drain_ns}),
+            &directory.join("model-outcome.json"),
+            &json!({
+                "termination":model_termination,"exit_code":status.code(),"signal":signal,
+                "elapsed_ns":elapsed,"wall_end_ms":wall_end,"pid":pid,
+                "scope":"Codex process wait; preserved before snapshot and delivery validation"
+            }),
         )?;
         let snapshot_started = Instant::now();
         let mut snapshot = snapshot(&workspace, task)?;
@@ -219,11 +256,16 @@ impl Execution<'_> {
         json_new(&directory.join("snapshot.json"), &snapshot)?;
         let snapshot_ns = snapshot_started.elapsed().as_nanos() as u64;
         let validation_started = Instant::now();
-        if task["acceptance"] == "programs" {
+        if cancellation.is_cancelled() {
+            termination = "cancelled";
+        }
+        if task["acceptance"] == "programs" && termination != "cancelled" {
             let validator = crate::submission::Validator {
                 bundle,
                 bundle_info,
                 path: manifest["path"].as_str().context("recorded PATH")?,
+                utilities: &manifest["utilities"],
+                cancellation: &cancellation,
             };
             let validation = match validator
                 .validate(
@@ -232,6 +274,7 @@ impl Execution<'_> {
                     &workspace,
                     &root.join("workspaces").join(format!("{id}-validation")),
                     &directory.join("submission"),
+                    v3.then_some(deadline),
                 )
                 .await
             {
@@ -240,8 +283,29 @@ impl Execution<'_> {
                     json!({"status":"harness_error","error":error.to_string(),"cases":null})
                 }
             };
+            if v3 && validation["status"] == "attempt_timeout" && termination == "exited" {
+                termination = "wall_limit";
+            }
+            if validation["status"] == "attempt_cancelled" {
+                termination = "cancelled";
+            }
             json_new(&directory.join("submission.json"), &validation)?;
+        } else if task["acceptance"] == "programs" {
+            json_new(
+                &directory.join("submission.json"),
+                &json!({"status":"attempt_cancelled","source":null,"build":null,"cases":[],"scope":"model session cancelled; no validation processes started"}),
+            )?;
         }
+        if v3 && Instant::now() >= deadline && termination == "exited" {
+            termination = "wall_limit";
+        }
+        if cancellation.is_cancelled() {
+            termination = "cancelled";
+        }
+        json_new(
+            &directory.join("outcome.json"),
+            &json!({"termination":termination,"model_termination":model_termination,"exit_code":status.code(),"signal":signal,"elapsed_ns":elapsed,"attempt_total_ns":start.elapsed().as_nanos() as u64,"wall_end_ms":wall_end,"pid":pid,"pair_id":pair,"shutdown_included":true,"collector_drain_ns":collector_drain_ns}),
+        )?;
         json_new(
             &directory.join("postprocess.json"),
             &json!({"snapshot_ns":snapshot_ns,"submission_validation_ns":if task["acceptance"]=="programs"{Some(validation_started.elapsed().as_nanos() as u64)}else{None},"scope":"after Codex process wait; excluded from attempt_process_ms"}),

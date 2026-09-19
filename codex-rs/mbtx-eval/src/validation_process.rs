@@ -32,7 +32,24 @@ pub(crate) async fn capture(
     directory: &Path,
     timeout: Duration,
 ) -> Result<Value> {
+    let cancellation = crate::cancellation::Cancellation::listen()?;
+    capture_cancellable(command, directory, timeout, &cancellation).await
+}
+
+pub(crate) async fn capture_cancellable(
+    command: &mut Command,
+    directory: &Path,
+    timeout: Duration,
+    cancellation: &crate::cancellation::Cancellation,
+) -> Result<Value> {
     std::fs::create_dir(directory)?;
+    if timeout.is_zero() || cancellation.is_cancelled() {
+        let value = json!({"started":false,"exit_code":null,"signal":null,"timed_out":timeout.is_zero(),"cancelled":cancellation.is_cancelled(),"wait_observed":false,"drain_complete":true,"residual_group_before_cleanup":null,"descendant_reap":null,"elapsed_ns":0,"streams":{}});
+        crate::evidence::write_new(&directory.join("stdout"), b"")?;
+        crate::evidence::write_new(&directory.join("stderr"), b"")?;
+        crate::evidence::json_new(&directory.join("process.json"), &value)?;
+        return Ok(value);
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -47,14 +64,16 @@ pub(crate) async fn capture(
     let pid = child.id().context("validation process PID")?;
     let stdout = tokio::spawn(drain(child.stdout.take().context("stdout")?));
     let stderr = tokio::spawn(drain(child.stderr.take().context("stderr")?));
-    let timed_out;
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(status) => {
-            timed_out = false;
-            status?
-        }
-        Err(_) => {
-            timed_out = true;
+    let mut timed_out = false;
+    let mut cancelled = false;
+    let waited = tokio::select! {
+        status = child.wait() => Some(status?),
+        _ = tokio::time::sleep(timeout) => { timed_out = true; None },
+        _ = cancellation.cancelled() => { cancelled = true; None },
+    };
+    let status = match waited {
+        Some(status) => status,
+        None => {
             #[cfg(unix)]
             unsafe {
                 libc::kill(-(pid as i32), libc::SIGKILL);
@@ -106,7 +125,7 @@ pub(crate) async fn capture(
     };
     #[cfg(not(unix))]
     let signal: Option<i32> = None;
-    let value = json!({"exit_code":status.code(),"signal":signal,"timed_out":timed_out,"wait_observed":true,"drain_complete":complete,"residual_group_before_cleanup":residual_group,"descendant_reap":null,"elapsed_ns":started.elapsed().as_nanos() as u64,"streams":streams});
+    let value = json!({"started":true,"exit_code":status.code(),"signal":signal,"timed_out":timed_out,"cancelled":cancelled,"wait_observed":true,"drain_complete":complete,"residual_group_before_cleanup":residual_group,"descendant_reap":null,"elapsed_ns":started.elapsed().as_nanos() as u64,"streams":streams});
     crate::evidence::json_new(&directory.join("process.json"), &value)?;
     Ok(value)
 }

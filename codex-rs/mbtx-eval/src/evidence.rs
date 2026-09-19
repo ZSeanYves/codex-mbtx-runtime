@@ -137,6 +137,9 @@ pub(crate) fn snapshot(workspace: &Path, task: &Value) -> Result<Value> {
         .cloned()
         .collect();
     names.push(task["output"].as_str().context("task output")?.to_owned());
+    if let Some(plan) = task["worker_plan_path"].as_str() {
+        names.push(plan.to_owned());
+    }
     names.extend(
         task["expected_outputs"]
             .as_object()
@@ -183,3 +186,7 @@ pub(crate) fn worker_events(evidence: &Path) -> Result<Value> {
             .collect::<std::result::Result<Vec<_>, _>>()?,
     )?)
 }
+
+#[cfg(test)]
+#[path = "evidence_tests.rs"]
+mod tests;

@@ -3,21 +3,27 @@
 mod analysis;
 mod attempt;
 mod bundle;
+mod cancellation;
 mod collect;
 mod config;
 mod evidence;
 mod gate;
 mod http_headers;
 mod observe;
+mod policy_preflight;
 mod preflight;
+mod process_policy;
 mod progress;
 mod replay;
+mod replay_program;
 mod report;
 mod report_details;
 mod report_html;
 mod request_contract;
 mod scheduling;
 mod submission;
+mod submission_contract;
+mod submission_phases;
 mod validation_process;
 mod worker_receipts;
 mod workspace;
@@ -157,7 +163,6 @@ async fn main() -> Result<()> {
                 min_interval_ms: 15000,
                 tasks,
                 scenarios: vec![],
-                variants: vec![],
                 resume: false,
                 replay_source: Some(run.canonicalize()?),
                 replay_fault: None,

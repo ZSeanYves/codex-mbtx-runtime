@@ -79,7 +79,7 @@ pub(crate) async fn log(root: &Path, follow: bool) -> Result<()> {
                     }
                 }
             }
-            current = json!({"assignment":assignment,"observed_steps_started":count.0,"observed_steps_accepted":count.1,"phase":if directory.join("outcome.json").exists(){"verification / finalization"}else if directory.join("process.json").exists(){"Codex agent loop / external request / pacing"}else{"workspace preparation"}});
+            current = json!({"assignment":assignment,"observed_steps_started":count.0,"observed_steps_accepted":count.1,"phase":if directory.join("model-outcome.json").exists() || directory.join("outcome.json").exists(){"verification / finalization"}else if directory.join("process.json").exists(){"Codex agent loop / external request / pacing"}else{"workspace preparation"}});
         }
         let paired = manifest["schedule"]
             .as_array()

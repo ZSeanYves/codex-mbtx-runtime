@@ -9,7 +9,7 @@ use serde_json::json;
 
 mod fixture_actions;
 
-fn run(args: &[String]) -> Result<ExitCode> {
+fn run(args: &[String]) -> Result<u8> {
     match args.first().map(String::as_str) {
         #[cfg(unix)]
         Some("launch") if args.len() >= 3 => {
@@ -24,7 +24,7 @@ fn run(args: &[String]) -> Result<ExitCode> {
             let value: i32 = args[1].parse().context("expected signed integer")?;
             if args[0] == "checked-square" && value % 5 == 0 {
                 eprintln!("controlled rejection");
-                return Ok(ExitCode::from(7));
+                return Ok(7);
             }
             println!(
                 "{}",
@@ -42,7 +42,7 @@ fn run(args: &[String]) -> Result<ExitCode> {
         }
         _ => bail!("usage: fixture-worker square N | checked-square N | echo [ARGS...]"),
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(0)
 }
 
 fn main() -> ExitCode {
@@ -52,9 +52,18 @@ fn main() -> ExitCode {
         Some("job" | "recover" | "emit" | "hash")
     );
     let result = (|| -> Result<ExitCode> {
-        if actions {
+        let observed = actions
+            || matches!(
+                args.first().map(String::as_str),
+                Some("square" | "checked-square" | "echo")
+            );
+        if observed {
             fixture_actions::receipt("started", &args, None)?;
-            let result = fixture_actions::execute(&args);
+            let result = if actions {
+                fixture_actions::execute(&args)
+            } else {
+                run(&args).map(|code| Some((ExitCode::from(code), code)))
+            };
             let code = match &result {
                 Ok(Some((_, code))) => *code,
                 _ => 2,
@@ -62,7 +71,7 @@ fn main() -> ExitCode {
             fixture_actions::receipt("completed", &args, Some(code))?;
             return Ok(result?.context("invalid worker action")?.0);
         }
-        run(&args)
+        run(&args).map(ExitCode::from)
     })();
     match result {
         Ok(status) => status,

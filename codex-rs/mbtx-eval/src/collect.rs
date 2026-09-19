@@ -37,7 +37,7 @@ pub(crate) struct RunArgs {
     pub output: PathBuf,
     #[arg(long, value_parser=["replay","relay"],default_value="replay")]
     pub mode: String,
-    #[arg(long,value_parser=["pilot","programs","workflow","long-study","long-pilot"],default_value="pilot")]
+    #[arg(long,value_parser=["basic","complexity","all"],default_value="all")]
     pub suite: String,
     #[arg(long, default_value = "mbtx/config/relay.toml")]
     pub config: PathBuf,
@@ -49,9 +49,9 @@ pub(crate) struct RunArgs {
     #[arg(long)]
     pub batch_pairs: Option<usize>,
     /// Entire Codex attempt, including external requests and pacing; never a step cutoff.
-    #[arg(long, default_value_t = 3600)]
+    #[arg(long, default_value_t = 7200)]
     pub max_wall_seconds: u64,
-    #[arg(long, default_value_t = 20260916)]
+    #[arg(long, default_value_t = 20260919)]
     pub seed: u64,
     #[arg(long, default_value_t = 15000)]
     pub min_interval_ms: u64,
@@ -59,8 +59,6 @@ pub(crate) struct RunArgs {
     pub tasks: Vec<String>,
     #[arg(long, value_delimiter = ',')]
     pub scenarios: Vec<String>,
-    #[arg(long, value_delimiter = ',')]
-    pub variants: Vec<u64>,
     #[arg(long)]
     pub resume: bool,
     #[arg(long)]
@@ -183,6 +181,9 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
     let protocol = analysis
         .query(json!({"op":"protocol","suite":args.suite}))
         .await?;
+    for task in protocol["tasks"].as_array().context("protocol tasks")? {
+        crate::process_policy::rules(task)?;
+    }
     let repeats = args.repeats.unwrap_or(
         protocol["repeats"]
             .as_u64()
@@ -220,17 +221,6 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
             "unknown scenario selection"
         );
         tasks.retain(|t| args.scenarios.iter().any(|id| t["scenario"] == *id));
-    }
-    if !args.variants.is_empty() {
-        ensure!(
-            args.variants.iter().all(|v| (1..=4).contains(v)),
-            "variants use one-based indices 1..4"
-        );
-        tasks.retain(|t| {
-            t["variant"]
-                .as_u64()
-                .is_some_and(|v| args.variants.contains(&(v + 1)))
-        });
     }
     ensure!(!tasks.is_empty(), "task selection is empty");
     let expected_schedule = schedule(&tasks, repeats, args.seed);
@@ -358,9 +348,14 @@ async fn collect_schedule(
             bundle: execution.bundle,
             bundle_info: execution.bundle_info,
             path: manifest["path"].as_str().context("recorded PATH")?,
+            utilities: &manifest["utilities"],
+            cancellation: &crate::cancellation::Cancellation::listen()?,
         },
     )
     .await?;
+    if manifest["protocol"]["protocol_id"] == "programmable-shell-replacement-v4" {
+        crate::policy_preflight::check(execution).await?;
+    }
     if args.mode == "relay" && !args.resume && !probe(root, config, gate).await? {
         return Ok("relay_probe_failed");
     }
@@ -406,14 +401,15 @@ async fn collect_schedule(
             fs::create_dir(&directory)?;
             json_new(
                 &directory.join("assignment.json"),
-                &json!({"attempt_id":id,"pair_id":pair["pair_id"],"task_id":task["id"],"arm":arm,"assigned_ms":now_ms()}),
+                &json!({"attempt_id":id,"pair_id":pair["pair_id"],"task_id":task["id"],"arm":arm,"repeat":pair["repeat"],"assigned_ms":now_ms()}),
             )?;
             eprintln!(
-                "[eval] {}/{} arms; {} {arm} {}",
+                "[eval] {}/{} arms; {} {arm} {}; repeat {}",
                 completed.len(),
                 pairs.len() * 2,
                 pair["pair_id"],
-                task["id"]
+                task["id"],
+                pair["repeat"].as_u64().context("repeat index")? + 1
             );
             let replies = if let Some(source) = &args.replay_source {
                 let source_attempt = report::find_attempt(source, &pair["pair_id"], arm)?;

@@ -46,8 +46,9 @@ pub(crate) fn schedule(tasks: &[Value], repeats: usize, seed: u64) -> Vec<Value>
     for repeat in 0..repeats {
         for (rank, &index) in order.iter().enumerate() {
             let n = pairs.len();
-            let orientation = if long { n } else { rank + repeat };
-            pairs.push(json!({"pair_id":format!("pair-{n:04}"),"task_id":tasks[index]["id"],"family":tasks[index]["family"],"scenario":tasks[index]["scenario"],"complexity":tasks[index]["complexity"],"cohort":tasks[index]["cohort"],"variant":tasks[index]["variant"],"repeat":repeat,"arms":if orientation%2==0 { ["shell_tool","mbtx_program"] } else { ["mbtx_program","shell_tool"] }}));
+            let v3 = tasks[index].get("process_allow").is_some();
+            let orientation = if long && !v3 { n } else { rank + repeat };
+            pairs.push(json!({"pair_id":format!("pair-{n:04}"),"task_id":tasks[index]["id"],"track":tasks[index]["track"],"family":tasks[index]["family"],"scenario":tasks[index]["scenario"],"complexity":tasks[index]["complexity"],"cohort":tasks[index]["cohort"],"variant":tasks[index]["variant"],"repeat":repeat,"arms":if orientation%2==0 { ["shell_tool","mbtx_program"] } else { ["mbtx_program","shell_tool"] }}));
         }
     }
     pairs

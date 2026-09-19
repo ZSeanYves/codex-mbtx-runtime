@@ -19,6 +19,8 @@ async fn sandbox_start_failure_is_sealed_without_starting_task_attempts() -> Res
             bundle: &bundle,
             bundle_info: &info,
             path: &path,
+            utilities: &json!({}),
+            cancellation: &crate::cancellation::Cancellation::listen()?,
         },
     )
     .await
@@ -37,7 +39,8 @@ async fn sandbox_start_failure_is_sealed_without_starting_task_attempts() -> Res
         .path();
     assert!(crate::evidence::verify(&evidence)?);
     let result = crate::evidence::read_json(&evidence.join("result.json"))?;
-    assert_eq!(result["status"], "harness_error");
+    assert_eq!(result["status"], "local_preflight_failure");
+    assert_eq!(result["failure_layer"], "sandbox/launcher");
     assert_eq!(crate::evidence::worker_events(&evidence)?, json!([]));
     let process = crate::evidence::read_json(&evidence.join("execution/process.json"))?;
     assert_eq!(process["exit_code"], 1);

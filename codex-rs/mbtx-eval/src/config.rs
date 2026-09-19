@@ -53,8 +53,8 @@ impl RelayConfig {
             "evaluation requires Responses and env_key authentication"
         );
         ensure!(
-            provider.request_max_retries <= 5 && provider.stream_max_retries <= 5,
-            "request_max_retries and stream_max_retries must each be 0..=5 retries after the initial attempt"
+            provider.request_max_retries <= 2 && provider.stream_max_retries <= 2,
+            "request_max_retries and stream_max_retries must each be 0..=2 retries after the initial attempt"
         );
         ensure!(
             !config.model.is_empty() && !provider.env_key.is_empty(),
@@ -135,9 +135,17 @@ pub(crate) fn child_config(
     );
     value.insert("tool_output_token_limit".into(), 4096.into());
     let socket: String = serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
+    let mut environment = serde_json::json!({"MBTX_WORKER_SOCKET":socket});
+    if work.join("tools").is_dir() {
+        environment["PATH"] = serde_json::json!(format!(
+            "{}:{}",
+            work.join("tools").display(),
+            std::env::var("PATH").context("host PATH")?
+        ));
+    }
     value.insert(
         "shell_environment_policy".into(),
-        toml::Value::try_from(serde_json::json!({"set":{"MBTX_WORKER_SOCKET":socket}}))?,
+        toml::Value::try_from(serde_json::json!({"set":environment}))?,
     );
     value.insert("project_doc_max_bytes".into(), 0.into());
     value.insert("project_root_markers".into(), toml::Value::Array(vec![]));
@@ -183,7 +191,7 @@ pub(crate) fn child_config(
         "features".into(),
         toml::Value::try_from(BTreeMap::from([
             ("shell_tool", !mbtx),
-            ("unified_exec", true),
+            ("unified_exec", !mbtx),
             ("code_mode", false),
             ("code_mode_only", false),
             ("code_mode_host", false),

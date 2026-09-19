@@ -46,6 +46,7 @@ pub(crate) fn permissions(work: &Path, bundle: &Path, moon_home: &Path) -> Resul
         .context("resolve sandbox re-entry executable")?;
     filesystem.insert(codex.to_string_lossy().into_owned(), "read".into());
     for path in [
+        bundle.join("codex-resources"),
         moon_home.join("bin"),
         moon_home.join("lib"),
         bundle.join("moon-home/registry"),
@@ -69,6 +70,20 @@ pub(crate) fn permissions(work: &Path, bundle: &Path, moon_home: &Path) -> Resul
                 .into_owned(),
             "write".into(),
         );
+    }
+    // The policy and executable lookup directory are evaluator-owned siblings,
+    // never writable children of the model workspace.
+    for name in ["runtime-policy.json", "tools"] {
+        let path = work.join(name);
+        if path.exists() {
+            filesystem.insert(path.to_string_lossy().into_owned(), "read".into());
+        }
+    }
+    if work.join("tools").is_dir() {
+        for entry in fs::read_dir(work.join("tools"))? {
+            let target = entry?.path().canonicalize()?;
+            filesystem.insert(target.to_string_lossy().into_owned(), "read".into());
+        }
     }
     Ok(toml::Value::try_from(
         json!({"evaluation":{"filesystem":filesystem,"network":{"enabled":false}}}),
@@ -106,6 +121,7 @@ pub(crate) async fn prepare(workspace: &Path, home: &Path, path: &str) -> Result
         let mut command = Command::new("git");
         command
             .args(*args)
+            .kill_on_drop(true)
             .current_dir(workspace)
             .env_clear()
             .env("PATH", path)

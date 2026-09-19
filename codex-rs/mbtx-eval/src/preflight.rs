@@ -70,8 +70,11 @@ pub(crate) async fn check(root: &Path, validator: &Validator<'_>) -> Result<()> 
     json_new(
         &evidence.join("result.json"),
         &json!({
-            "status":if result.is_ok(){"success"}else{"harness_error"},
+            "status":if result.is_ok(){"success"}else{"local_preflight_failure"},
             "error":result.as_ref().err().map(ToString::to_string),
+            "sandbox_entry_observed":work.join("tmp/entry-observed").is_file(),
+            "failure_layer":if result.is_ok(){None}else if !work.join("tmp/entry-observed").is_file(){Some("sandbox/launcher")}else{Some("worker IPC/execution")},
+            "failure_attribution":"inferred from the observed preflight stage; raw stderr remains authoritative",
             "scope":"Local sandbox and worker IPC only; before relay probes and task attempts",
         }),
     )?;

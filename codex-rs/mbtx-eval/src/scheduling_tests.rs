@@ -2,6 +2,17 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn v3_repetitions_exchange_arm_order_on_identical_inputs() {
+    let tasks = (0..12).map(|i| json!({"id":i.to_string(),"family":i.to_string(),"cohort":"workflow","process_allow":[]})).collect::<Vec<_>>();
+    let plan = schedule(&tasks, 2, 20260919);
+    for (first, second) in plan[..12].iter().zip(&plan[12..]) {
+        assert_eq!(first["task_id"], second["task_id"]);
+        assert_eq!(first["arms"][0], second["arms"][1]);
+        assert_eq!(first["arms"][1], second["arms"][0]);
+    }
+}
+
+#[test]
 fn every_block_balances_categories_and_complexity_without_outcome_selection() {
     let mut tasks = Vec::new();
     for family in 0..10 {

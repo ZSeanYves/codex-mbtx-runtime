@@ -66,45 +66,40 @@ pub(crate) fn fault(name: &str) -> Reply {
 }
 
 pub(crate) fn fixed(task: &Value, arm: &str, prefix_turns: usize) -> Result<Vec<Reply>> {
-    let output = task["output"].as_str().context("output file")?;
-    let expected = serde_json::to_string(&task["expected"])?;
-    let boundary = "test \"$(git rev-parse --show-toplevel)\" = \"$PWD\" && test -z \"$(git status --porcelain)\" && test ! -r ../../../run.json";
-    let arguments = if let Some(script) = task["reference_shell"].as_str() {
-        if arm == "mbtx_program" {
-            // This uses a declared Shell utility from MBTX. It validates the
-            // collector and generalization oracle, not MoonBit efficiency.
-            let program = format!(
-                "import {{\n  \"moonbitlang/async@0.21.3\",\n  \"moonbitlang/async@0.21.3/shell\",\n}}\nasync fn main {{\n  @shell.Cmd(\"sh\",[\"-c\",{}]).run()\n}}\n",
-                serde_json::to_string(script)?
-            );
-            let source = format!(
-                "import {{\n  \"moonbitlang/async@0.21.3\",\n  \"moonbitlang/async@0.21.3/fs\",\n  \"moonbitlang/async@0.21.3/shell\",\n}}\nasync fn main {{\n  @shell.Cmd(\"sh\",[\"-c\",{}]).run()\n  @fs.write_file(\"solution.mbtx\",{})\n  @shell.Cmd(\"sh\",[\"-c\",{}]).run()\n}}\n",
-                serde_json::to_string(boundary)?,
-                serde_json::to_string(&program)?,
-                serde_json::to_string(script)?
-            );
-            json!({"source":source,"max_output_bytes":4096})
+    let arguments = if arm == "mbtx_program" {
+        let program = crate::replay_program::source(task)?;
+        let source = if let Some(name) = crate::submission_contract::required_source(task, arm)? {
+            // The delivered program depends on inputs alone. Only its initial
+            // interactive invocation writes the exact source for validation.
+            program.replacen(
+                "async fn main {",
+                &format!(
+                    "async fn main {{\n  @fs.write_file({}, {})",
+                    serde_json::to_string(&name)?,
+                    serde_json::to_string(&program)?
+                ),
+                1,
+            )
         } else {
-            let quoted = format!("'{}'", script.replace('\'', "'\\''"));
-            json!({"cmd":format!("set -eu\n{boundary}\nprintf '%s' {quoted} > solution.sh\nsh solution.sh"),"login":false,"max_output_tokens":1024})
-        }
-    } else if arm == "mbtx_program" {
-        // The configuration fixture reproduces compiler warnings exhausting a
-        // combined output budget. Its runtime marker must still reach Codex.
-        let warnings = if task["id"] == "configuration-repair" {
-            "  let _ = @json.parse(\"null\").to_string();\n".repeat(24)
-        } else {
-            String::new()
+            program
         };
-        let source = format!(
-            "import {{\n  \"moonbitlang/async@0.21.3\",\n  \"moonbitlang/async@0.21.3/fs\",\n}}\nasync fn main {{\n{warnings}  @fs.write_file({}, {})\n  println(\"runtime output retained\")\n}}\n",
-            serde_json::to_string(output)?,
-            serde_json::to_string(&(expected + "\n"))?
+        anyhow::ensure!(
+            source.len() <= crate::submission_contract::SOURCE_LIMIT_BYTES as usize,
+            "replay invocation exceeds source limit"
         );
         json!({"source":source,"max_output_bytes":4096})
     } else {
-        let quote = |text: &str| format!("'{}'", text.replace('\'', "'\\''"));
-        json!({"cmd":format!("printf '%s\\n' {} > {}",quote(&expected),quote(output)),"login":false,"max_output_tokens":1024})
+        let script = task["reference_shell"]
+            .as_str()
+            .context("frozen Shell reference")?;
+        let quoted = format!("'{}'", script.replace('\'', "'\\''"));
+        let command = if let Some(name) = crate::submission_contract::required_source(task, arm)? {
+            anyhow::ensure!(name == "solution.sh", "unsupported Shell source contract");
+            format!("set -eu\nprintf '%s' {quoted} > solution.sh\nsh solution.sh")
+        } else {
+            script.to_owned()
+        };
+        json!({"cmd":command,"login":false,"max_output_tokens":1024})
     };
     // Deliberately prescribed solutions validate transport, tool execution and
     // independent negative oracle tests. They are never research samples.
