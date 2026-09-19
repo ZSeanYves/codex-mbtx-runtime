@@ -10,6 +10,7 @@ use codex_tools::ToolExecutorFuture;
 use codex_tools::ToolName;
 use codex_tools::ToolOutput;
 use codex_tools::ToolSpec;
+use codex_tools::output_archive::ResourcePage;
 use codex_tools::output_archive::read_text_page;
 use serde::Deserialize;
 
@@ -32,7 +33,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ResourceTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: "read_resource".into(),
-            description: "Read a page of a registered read-only resource. References: reference:moonbit (verified language and IO APIs), reference:shell (portable shell), reference:tools (installed rg, jq and git), reference:examples (runnable general API examples). Output resource IDs are returned by execution tools. offset and next_offset are UTF-8 byte offsets; follow next_offset until eof. This tool cannot read arbitrary paths or other sessions. No compilation or execution occurs.".into(),
+            description: "Read a page of a registered read-only resource. Start with reference:moonbit for the API index; reference:syntax, reference:files, reference:collections and reference:processes cover exact installed APIs. reference:tools describes direct utilities, reference:examples is the verified executable API example, reference:shell is for the Shell arm. Output IDs come from execution tools. offset and next_offset are UTF-8 byte offsets; follow next_offset until eof. No arbitrary paths, other sessions, compilation or execution.".into(),
             strict: false,
             parameters: JsonSchema::object([
                 ("resource_id".into(), JsonSchema::string(None)),
@@ -50,7 +51,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ResourceTool {
         Box::pin(async move {
             let input: Input = serde_json::from_str(call.function_arguments()?)
                 .map_err(|e| FunctionCallError::RespondToModel(e.to_string()))?;
-            let capacity = call.response_byte_budget(65536).saturating_sub(1024) / 6;
+            let capacity = call.response_byte_budget(65536);
             let requested = input.max_bytes.unwrap_or(8192);
             if !(4..=65536).contains(&requested) || capacity < 4 {
                 return Err(FunctionCallError::RespondToModel(
@@ -64,6 +65,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ResourceTool {
                     "shell" => "shell.md",
                     "tools" => "tools.md",
                     "examples" => "examples.mbtx",
+                    "syntax" => "syntax.md",
+                    "files" => "files.md",
+                    "collections" => "collections.md",
+                    "processes" => "processes.md",
+                    "tool-example" => "tool-example.mbtx",
+                    "process-examples" => "process-examples.mbtx",
                     _ => {
                         return Err(FunctionCallError::RespondToModel(
                             "Unknown registered reference".into(),
@@ -89,9 +96,52 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ResourceTool {
             .map_err(|e| {
                 FunctionCallError::RespondToModel(format!("Cannot read registered resource: {e}"))
             })?;
+            let result = fit_page(result, capacity)?;
             let value = serde_json::to_value(result)
                 .map_err(|e| FunctionCallError::Fatal(e.to_string()))?;
             Ok(Box::new(JsonToolOutput::with_success(value, Some(true))) as Box<dyn ToolOutput>)
         })
     }
 }
+
+// Read once, then fit the actual serialized response. UTF-8 boundaries and JSON
+// escapes both matter; a worst-case expansion factor wastes ordinary pages.
+fn fit_page(mut page: ResourcePage, budget: usize) -> Result<ResourcePage, FunctionCallError> {
+    let text = std::mem::take(&mut page.text);
+    let boundaries: Vec<_> = text
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain([text.len()])
+        .collect();
+    let mut low = 0;
+    let mut high = boundaries.len();
+    while low < high {
+        let candidate = (low + high) / 2;
+        let end = boundaries[candidate];
+        page.text = text[..end].into();
+        page.next_offset = page.offset + end as u64;
+        page.eof = page.next_offset == page.total_bytes;
+        let size = serde_json::to_vec(&page)
+            .map_err(|error| FunctionCallError::Fatal(error.to_string()))?
+            .len();
+        if size <= budget {
+            low = candidate + 1;
+        } else {
+            high = candidate;
+        }
+    }
+    if low == 0 || (low == 1 && !text.is_empty()) {
+        return Err(FunctionCallError::RespondToModel(
+            "Resource metadata and next character exceed the current response budget".into(),
+        ));
+    }
+    let end = boundaries[low - 1];
+    page.text = text[..end].into();
+    page.next_offset = page.offset + end as u64;
+    page.eof = page.next_offset == page.total_bytes;
+    Ok(page)
+}
+
+#[cfg(test)]
+#[path = "resources_tests.rs"]
+mod tests;

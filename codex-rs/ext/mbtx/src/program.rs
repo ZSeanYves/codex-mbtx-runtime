@@ -7,78 +7,17 @@ use codex_file_system::CreateDirectoryOptions;
 use codex_file_system::GetMetadataOptions;
 use codex_file_system::ReadFileOptions;
 use codex_file_system::WriteFileOptions;
-use codex_tools::FunctionCallError;
 use codex_tools::ToolCall;
-use codex_tools::ToolProcessOutput;
 use codex_tools::ToolProcessRequest;
 use codex_tools::ToolProcessStatus;
 use codex_utils_path_uri::PathUri;
-use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use std::time::Instant;
 use uuid::Uuid;
 
+use crate::program_output::ProgramResult;
 use crate::tool::ProgramInput;
-
-#[derive(Serialize)]
-pub(crate) struct ProgramResult {
-    pub status: &'static str,
-    pub stage: &'static str,
-    pub target: &'static str,
-    pub source_path: Option<String>,
-    pub artifact_path: Option<String>,
-    pub build: Option<ToolProcessOutput>,
-    pub run: Option<ToolProcessOutput>,
-    pub error: Option<String>,
-    pub cache: &'static str,
-    pub build_reused_from: Option<String>,
-    pub preparation_ms: u64,
-    pub source_resource: Option<codex_tools::output_archive::OutputResource>,
-    pub artifact_resource: Option<codex_tools::output_archive::OutputResource>,
-}
-
-impl ProgramResult {
-    // The raw stream limit is not enough: JSON escaping can expand each byte.
-    // Bound the serialized result too, marking every additional truncation.
-    pub(crate) fn fit_response(&mut self, budget: usize) -> Result<(), FunctionCallError> {
-        loop {
-            if serde_json::to_vec(&self)
-                .map_err(|error| {
-                    FunctionCallError::Fatal(format!("MBTX result serialization failed: {error}"))
-                })?
-                .len()
-                <= budget
-            {
-                return Ok(());
-            }
-            let mut shortened = false;
-            for output in [&mut self.build, &mut self.run].into_iter().flatten() {
-                for (text, truncated) in [
-                    (&mut output.stdout, &mut output.stdout_truncated),
-                    (&mut output.stderr, &mut output.stderr_truncated),
-                ] {
-                    if !text.is_empty() {
-                        let mut length = text.len() / 2;
-                        while !text.is_char_boundary(length) {
-                            length -= 1;
-                        }
-                        text.truncate(length);
-                        *truncated = true;
-                        shortened = true;
-                    }
-                }
-                // Compiler diagnostics must not evict runtime output first.
-                if shortened {
-                    break;
-                }
-            }
-            if !shortened {
-                return Err(FunctionCallError::RespondToModel("MBTX result metadata exceeds the host response budget; execution artifacts remain in the workspace".into()));
-            }
-        }
-    }
-}
 
 fn native(path: &PathUri) -> Result<String, String> {
     path.to_abs_path()
@@ -105,6 +44,7 @@ pub(crate) async fn execute(
         source_path: None,
         artifact_path: None,
         build: None,
+        compiler_preview: None,
         run: None,
         error: None,
         cache: "miss",
@@ -112,9 +52,16 @@ pub(crate) async fn execute(
         preparation_ms: 0,
         source_resource: None,
         artifact_resource: None,
+        policy_sha256: None,
+        process_denial_diagnostic: None,
     };
     let outcome = async {
         let preparing = Instant::now();
+        config.remaining_attempt_ms().map_err(|e| e.to_string())?;
+        if let Some(policy) = &config.runtime_policy {
+            let bytes = std::fs::read(policy).map_err(|e| e.to_string())?;
+            result.policy_sha256 = Some(format!("{:x}", Sha256::digest(bytes)));
+        }
         if input.argv.len() > 256
             || input.argv.iter().map(String::len).sum::<usize>() > 32768
             || input.argv.iter().any(|arg| arg.contains('\0'))
@@ -313,10 +260,15 @@ pub(crate) async fn execute(
                         "--release".into(),
                         "--target-dir".into(),
                         native(&target_dir)?,
-                        source_path,
+                        source_path.clone(),
                     ],
                     cwd: cwd.clone(),
-                    timeout_ms: input.build_timeout_ms.unwrap_or(60_000).clamp(1, 120_000),
+                    timeout_ms: config
+                        .remaining_attempt_ms()
+                        .map_err(|e| e.to_string())?
+                        .unwrap_or_else(|| {
+                            input.build_timeout_ms.unwrap_or(60_000).clamp(1, 120_000)
+                        }),
                     max_output_bytes: budget,
                     description: "Compile submitted MBTX program under current permissions".into(),
                     phase: "build",
@@ -337,6 +289,25 @@ pub(crate) async fn execute(
                 .await?
         };
         let original_build = build.clone();
+        let compiled_source = cached
+            .as_ref()
+            .map_or(source_path.as_str(), |entry| entry.source_path.as_str());
+        result.compiler_preview = Some(crate::diagnostics::preview(
+            &build,
+            compiled_source,
+            executor.as_ref(),
+        ));
+        // Keep the raw resource receipt, but do not repeat it next to the derived
+        // diagnostic. Hosts without archives retain their original preview.
+        if !build.stderr.is_empty()
+            && build
+                .resources
+                .iter()
+                .any(|resource| resource.stream == "stderr" && resource.complete)
+        {
+            build.stderr.clear();
+            build.stderr_truncated = true;
+        }
         let build_ok = build.status == ToolProcessStatus::Exited && build.exit_code == Some(0);
         if build_ok {
             // Preserve at least half the combined stream budget for execution.
@@ -374,22 +345,19 @@ pub(crate) async fn execute(
             let mut artifact = target_dir
                 .join("program.mbtx/wasm/release/build/single/single.wasm")
                 .map_err(|e| e.to_string())?;
-            let options = GetMetadataOptions { follow_symlinks: false };
+            let options = GetMetadataOptions {
+                follow_symlinks: false,
+            };
             let metadata = match fs.get_metadata(&artifact, options, sandbox).await {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     artifact = target_dir
                         .join("wasm/release/build/single/single.wasm")
                         .map_err(|e| e.to_string())?;
-                    fs
-                .get_metadata(
-                    &artifact,
-                    options,
-                    sandbox,
-                )
-                .await
+                    fs.get_metadata(&artifact, options, sandbox).await
                 }
                 result => result,
-            }.map_err(|e| e.to_string())?;
+            }
+            .map_err(|e| e.to_string())?;
             if !metadata.is_file {
                 return Err("compiler did not produce the expected regular Wasm artifact".into());
             }
@@ -406,6 +374,7 @@ pub(crate) async fn execute(
             let compiled = Compiled {
                 bytes,
                 build: original_build,
+                source_path,
                 call_id: call.call_id.clone(),
             };
             prepared.entries.insert(key, compiled.clone());
@@ -428,24 +397,38 @@ pub(crate) async fn execute(
         drop(state);
         let artifact_path = native(&execution_artifact)?;
         result.artifact_path = Some(artifact_path.clone());
-        let mut command = vec![
-            moonrun.to_string_lossy().into_owned(),
-            "--".into(),
-            artifact_path,
-        ];
+        let mut command = vec![moonrun.to_string_lossy().into_owned()];
+        if let Some(policy) = &config.runtime_policy {
+            command.extend(["--policy".into(), policy.to_string_lossy().into_owned()]);
+        }
+        command.extend(["--".into(), artifact_path]);
         command.extend(input.argv);
         let run = executor
             .execute(ToolProcessRequest {
                 environment_id: environment.environment_id.clone(),
                 command,
                 cwd,
-                timeout_ms: input.run_timeout_ms.unwrap_or(10_000).clamp(1, 60_000),
+                timeout_ms: config
+                    .remaining_attempt_ms()
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or_else(|| input.run_timeout_ms.unwrap_or(10_000).clamp(1, 60_000)),
                 max_output_bytes: remaining,
                 description: "Execute submitted MBTX program under current permissions".into(),
                 phase: "run",
-                env_overrides: Default::default(),
+                env_overrides: config
+                    .execution_path
+                    .iter()
+                    .map(|path| ("PATH".into(), path.clone()))
+                    .collect(),
             })
             .await?;
+        if run
+            .stderr
+            .lines()
+            .any(|line| line == "Sandbox policy blocked process spawn")
+        {
+            result.process_denial_diagnostic = Some("Sandbox policy blocked process spawn");
+        }
         if run.status == ToolProcessStatus::Exited && run.exit_code == Some(0) {
             result.status = "success";
         }
@@ -459,7 +442,3 @@ pub(crate) async fn execute(
     }
     result
 }
-
-#[cfg(test)]
-#[path = "program_tests.rs"]
-mod tests;

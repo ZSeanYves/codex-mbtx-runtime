@@ -20,6 +20,12 @@ pub struct MbtxConfig {
     /// Explicit host-selected Unix receipt socket. Grants only this IPC path
     /// to both interfaces; does not enable TCP, DNS or a managed proxy.
     pub observation_socket: Option<AbsolutePathBuf>,
+    /// Host-owned, read-only MoonRun policy applied to every Wasm execution.
+    pub runtime_policy: Option<AbsolutePathBuf>,
+    /// Host PATH used by MoonRun to resolve the policy's registered programs.
+    pub execution_path: Option<String>,
+    /// Absolute experiment deadline, shared by compilation and execution.
+    pub attempt_deadline_unix_ms: Option<u64>,
 }
 
 impl MbtxConfig {
@@ -70,7 +76,66 @@ impl MbtxConfig {
                 "mbtx.dependency_cache must be a directory containing preinstalled dependency sources",
             ));
         }
+        match (&self.runtime_policy, &self.execution_path) {
+            (Some(policy), Some(path)) => {
+                let metadata = std::fs::symlink_metadata(policy)?;
+                if !metadata.is_file() || !metadata.permissions().readonly() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "mbtx.runtime_policy must be a read-only regular file",
+                    ));
+                }
+                if path.is_empty() || path.contains('\0') {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "mbtx.execution_path must contain absolute read-only directories",
+                    ));
+                }
+                for directory in std::env::split_paths(path) {
+                    if !directory.is_absolute() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "mbtx.execution_path must contain absolute read-only directories",
+                        ));
+                    }
+                    let metadata = std::fs::metadata(directory)?;
+                    if !metadata.is_dir() || !metadata.permissions().readonly() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "mbtx.execution_path must contain absolute read-only directories",
+                        ));
+                    }
+                }
+            }
+            (None, None) => {}
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "mbtx.runtime_policy and mbtx.execution_path must be configured together",
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// Remaining host-selected attempt time, never exceeding the two-hour ceiling.
+    /// Call again before each spawn so preparation and approval consume this budget.
+    pub fn remaining_attempt_ms(&self) -> std::io::Result<Option<u64>> {
+        let Some(deadline) = self.attempt_deadline_unix_ms else {
+            return Ok(None);
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(std::io::Error::other)?
+            .as_millis();
+        let remaining = u128::from(deadline).saturating_sub(now);
+        if remaining == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "MBTX attempt deadline expired before process startup",
+            ));
+        }
+        Ok(Some(remaining.min(7_200_000) as u64))
     }
 }
 

@@ -44,7 +44,7 @@ fn record_expectation(
     expected: Value,
 ) -> Result<(PathBuf, RolloutTrace)> {
     let root = std::env::var_os("CODEX_ROLLOUT_TRACE_ROOT")
-        .context("run moon run mbtx/scripts/validate-steps.mbtx")?;
+        .context("run moon run mbtx/scripts/validate-evaluation.mbtx")?;
     let suffix = format!("-{}", test.session_configured.thread_id);
     let mut candidates = std::fs::read_dir(root)?
         .filter_map(Result::ok)
@@ -117,7 +117,7 @@ fn record_expectation(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a fresh trace root; run the stage-two validation entry"]
+#[ignore = "requires a fresh trace root; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn multiple_shell_tools_and_final_answer_are_two_steps() -> Result<()> {
     let server = responses::start_mock_server().await;
     let mut events = vec![responses::ev_response_created("tools")];
@@ -158,7 +158,7 @@ async fn multiple_shell_tools_and_final_answer_are_two_steps() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a fresh trace root; run the stage-two validation entry"]
+#[ignore = "requires a fresh trace root; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn http_retry_is_one_step_and_two_sends() -> Result<()> {
     let server = responses::start_mock_server().await;
     let mock = responses::mount_response_sequence(
@@ -194,7 +194,7 @@ async fn http_retry_is_one_step_and_two_sends() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a fresh trace root; run the stage-two validation entry"]
+#[ignore = "requires a fresh trace root; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn exhausted_429_retains_started_round_without_acceptance() -> Result<()> {
     let server = responses::start_mock_server().await;
     let mock = responses::mount_response_once(
@@ -228,7 +228,7 @@ async fn exhausted_429_retains_started_round_without_acceptance() -> Result<()> 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a fresh trace root; run the stage-two validation entry"]
+#[ignore = "requires a fresh trace root; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn partial_stream_side_effect_and_retry_keep_one_round() -> Result<()> {
     let server = responses::start_mock_server().await;
     let partial = responses::sse_response(responses::sse(vec![
@@ -269,7 +269,7 @@ async fn partial_stream_side_effect_and_retry_keep_one_round() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a fresh trace root; run the stage-two validation entry"]
+#[ignore = "requires a fresh trace root; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn interrupt_then_resume_does_not_recount_history() -> Result<()> {
     let server = responses::start_mock_server().await;
     let delayed = responses::mount_response_once(
@@ -327,7 +327,7 @@ async fn interrupt_then_resume_does_not_recount_history() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a fresh trace root; run the stage-two validation entry"]
+#[ignore = "requires a fresh trace root; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn manual_compaction_is_request_work_outside_task_steps() -> Result<()> {
     let server = responses::start_mock_server().await;
     let mock = responses::mount_response_sequence(
@@ -366,7 +366,7 @@ async fn manual_compaction_is_request_work_outside_task_steps() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires MoonBit and a fresh trace root; run the stage-two validation entry"]
+#[ignore = "requires MoonBit and a fresh trace root; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn mbtx_compiler_repair_is_a_new_model_decision() -> Result<()> {
     let server = responses::start_mock_server().await;
     let mut replies = Vec::new();

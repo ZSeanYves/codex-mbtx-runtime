@@ -85,6 +85,7 @@ pub(crate) struct Prepared {
 
 #[derive(Clone)]
 pub(crate) struct Compiled {
+    pub source_path: String,
     pub bytes: Vec<u8>,
     pub build: ToolProcessOutput,
     pub call_id: String,

@@ -13,12 +13,15 @@ fn escaped_output_fits_the_response_budget_without_fabricating_observations() {
         source_path: None,
         artifact_path: None,
         build: None,
+        compiler_preview: None,
         error: None,
         cache: "cold",
         build_reused_from: None,
         preparation_ms: 0,
         source_resource: None,
         artifact_resource: None,
+        policy_sha256: None,
+        process_denial_diagnostic: None,
         run: Some(ToolProcessOutput {
             status: ToolProcessStatus::Cancelled,
             exit_code: None,
@@ -75,7 +78,10 @@ fn successful_compiler_warnings_do_not_evict_runtime_output() {
         preparation_ms: 0,
         source_resource: None,
         artifact_resource: None,
+        policy_sha256: None,
+        process_denial_diagnostic: None,
         build: Some(output(String::new(), "compiler warning 雪\n".repeat(1000))),
+        compiler_preview: None,
         run: Some(output("observed runtime output\n".into(), String::new())),
     };
     result.fit_response(700).unwrap();

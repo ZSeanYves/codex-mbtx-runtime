@@ -1,0 +1,107 @@
+///|
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/json",
+}
+
+///|
+async fn denied(program : String, args : Array[String]) -> Unit {
+  let blocked = try {
+    ignore(@shell.Cmd(program, args).output())
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(blocked)
+}
+
+///|
+async fn main {
+  @fs.write_file("input.txt", "snow 雪\n")
+  @fs.write_file("jq", "workspace shadow must not be selected")
+  let json = @shell.Cmd("jq", ["-cn", "{answer:49}"]).output()
+  assert_eq(json.exit_code(), 0)
+  assert_eq(@json.parse(json.stdout()), ({ "answer": 49 } : Json))
+  assert_eq(
+    @shell.Cmd("rg", ["--no-config", "--json", "--", "snow", "input.txt"])
+    .output()
+    .exit_code(),
+    0,
+  )
+  assert_eq(
+    @shell.Cmd("rg", ["--no-config", "--files", "--", "."]).output().exit_code(),
+    0,
+  )
+  let square = @shell.Cmd("fixture-worker", ["square", "7"]).output()
+  assert_eq(square.exit_code(), 0)
+  assert_eq(
+    @shell.Cmd("fixture-worker", ["checked-square", "5"]).output().exit_code(),
+    7,
+  )
+  assert_eq(
+    @shell.Cmd(
+      "fixture-worker",
+      ["echo", "a; b", "$(literal)"],
+      stdin=@shell.Text("雪"),
+    )
+    .output()
+    .exit_code(),
+    0,
+  )
+  @fs.write_file(
+    "records.json", "{\"records\":[{\"id\":\"record-a\",\"generation\":1,\"value\":7}]}",
+  )
+  assert_eq(
+    @shell.Cmd("fixture-worker", ["recover", "records.json", "record-a"])
+    .output()
+    .exit_code(),
+    0,
+  )
+  @fs.write_file(
+    "jobs.json", "{\"jobs\":[{\"id\":\"job-a\",\"generation\":1,\"value\":1,\"deps\":[],\"enabled\":true,\"fail_once\":true}]}",
+  )
+  assert_eq(
+    @shell.Cmd("fixture-worker", ["job", "jobs.json", "job-a"])
+    .output()
+    .exit_code(),
+    7,
+  )
+  assert_eq(
+    @shell.Cmd("fixture-worker", ["job", "jobs.json", "job-a"])
+    .output()
+    .exit_code(),
+    0,
+  )
+  @fs.write_file(
+    "streams.json", "{\"stdout\":\"input.txt\",\"stderr\":\"input.txt\"}",
+  )
+  assert_eq(
+    @shell.Cmd("fixture-worker", ["emit", "streams.json"]).output().exit_code(),
+    0,
+  )
+  assert_eq(
+    @shell.Cmd("fixture-worker", ["hash", "input.txt"]).output().exit_code(),
+    0,
+  )
+  for action in ["job", "recover"] {
+    assert_eq(@shell.Cmd("fixture-worker", [action, "--help"]).output().exit_code(), 0)
+  }
+  assert_true(@shell.Cmd("fixture-worker", ["job", "jobs.json", "invalid/id"]).output().exit_code() != 0)
+  for
+    name in [
+      "sh", "bash", "dash", "python3", "node", "env", "xargs", "git", "bwrap", "/bin/sh",
+      "./jq",
+    ] {
+    denied(name, ["-c", "exit 0"])
+  }
+  denied("fixture-worker", [
+    "launch", "forbidden-marker", "/bin/sh", "-c", "exit 0",
+  ])
+  denied("rg", ["--pre", "sh", "snow", "input.txt"])
+  assert_false(@fs.exists("forbidden-marker"))
+  println(
+    "policy preflight passed: allowed direct utilities, 13 rejected requests",
+  )
+}

@@ -119,14 +119,28 @@ impl ToolProcessExecutor for CoreProcessExecutor {
     ) -> Pin<Box<dyn Future<Output = Result<ToolProcessOutput, String>> + Send + 'a>> {
         Box::pin(async move {
             self.check_available(&request.environment_id)?;
+            let invocation = self.0.upgrade().ok_or("tool invocation has ended")?;
+            let timeout_limit = if invocation.tool_name.name == "mbtx"
+                && invocation.tool_name.is_default_namespace()
+                && invocation
+                    .step_context
+                    .turn
+                    .config
+                    .mbtx
+                    .attempt_deadline_unix_ms
+                    .is_some()
+            {
+                7_200_000
+            } else {
+                120_000
+            };
             if request.command.is_empty()
                 || request.timeout_ms == 0
-                || request.timeout_ms > 120_000
+                || request.timeout_ms > timeout_limit
                 || request.max_output_bytes > 65536
             {
                 return Err("invalid bounded process request".into());
             }
-            let invocation = self.0.upgrade().ok_or("tool invocation has ended")?;
             let environment = invocation
                 .step_context
                 .environments
@@ -268,9 +282,23 @@ impl ToolRuntime<ProcessRequest, ToolProcessOutput> for ProcessRuntime {
             ),
             additional_permissions: req.additional_permissions.clone(),
         };
+        let remaining = if ctx.tool_name.name == "mbtx" && ctx.tool_name.is_default_namespace() {
+            ctx.step_context
+                .turn
+                .config
+                .mbtx
+                .remaining_attempt_ms()
+                .map_err(|error| ToolError::Rejected(error.to_string()))?
+        } else {
+            None
+        };
         let options = ExecOptions {
             expiration: ExecExpiration::TimeoutOrCancellation {
-                timeout: Duration::from_millis(req.process.timeout_ms),
+                timeout: Duration::from_millis(
+                    remaining.map_or(req.process.timeout_ms, |remaining| {
+                        remaining.min(req.process.timeout_ms)
+                    }),
+                ),
                 cancellation: ctx.cancellation_token.clone(),
             },
             capture_policy: ExecCapturePolicy::BoundedProcess {

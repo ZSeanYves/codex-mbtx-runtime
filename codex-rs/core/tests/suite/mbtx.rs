@@ -29,6 +29,10 @@ use wiremock::MockServer;
 
 const CAPABILITIES: &str = include_str!("../../../../mbtx/fixtures/capabilities.mbtx");
 
+#[cfg(unix)]
+#[path = "mbtx_policy.rs"]
+mod policy;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires MoonBit and cached async 0.21.3"]
 async fn filename_reuses_compilation_but_executes_fresh_and_source_changes_invalidate() -> Result<()>
@@ -203,7 +207,7 @@ fn outcome(mock: &responses::ResponseMock) -> Result<Value> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires MoonBit and cached async 0.21.3; run the stage-one validation command"]
+#[ignore = "requires MoonBit and cached async 0.21.3; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn inline_program_preserves_inputs_inside_codex_sandbox() -> Result<()> {
     let server = responses::start_mock_server().await;
     let test = configured(&server).await?;
@@ -257,7 +261,7 @@ async fn inline_program_preserves_inputs_inside_codex_sandbox() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires MoonBit; run the stage-one validation command"]
+#[ignore = "requires MoonBit; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn compile_failure_and_runtime_failure_are_distinct() -> Result<()> {
     for (source, failed_stage) in [
         ("fn main { this_is_not_defined() }", "compilation"),
@@ -284,7 +288,7 @@ async fn compile_failure_and_runtime_failure_are_distinct() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires MoonBit; run the stage-one validation command"]
+#[ignore = "requires MoonBit; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn approval_denial_prevents_compilation() -> Result<()> {
     let server = responses::start_mock_server().await;
     let test = configured(&server).await?;
@@ -346,7 +350,7 @@ async fn approval_denial_prevents_compilation() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires MoonBit and cached async 0.21.3; run the stage-one validation command"]
+#[ignore = "requires MoonBit and cached async 0.21.3; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn runtime_timeout_returns_observed_status() -> Result<()> {
     let server = responses::start_mock_server().await;
     let test = configured(&server).await?;
@@ -373,7 +377,7 @@ async fn main { println("ready"); @async.sleep(30000) }"#, "run_timeout_ms":500}
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires MoonBit and cached async 0.21.3; run the stage-one validation command"]
+#[ignore = "requires MoonBit and cached async 0.21.3; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn real_interrupt_waits_for_reap_before_turn_aborted() -> Result<()> {
     let server = responses::start_mock_server().await;
     let test = configured(&server).await?;
@@ -448,7 +452,7 @@ async fn main {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires MoonBit and cached async 0.21.3; run the stage-one validation command"]
+#[ignore = "requires MoonBit and cached async 0.21.3; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn program_cannot_write_a_file_denied_by_codex() -> Result<()> {
     for source in [
         r#"import { "moonbitlang/async@0.21.3", "moonbitlang/async@0.21.3/fs", "moonbitlang/core/env" }
@@ -488,14 +492,15 @@ async fn main {
         assert_eq!(result["status"], "error", "{result:#}");
         assert!(
             !target.exists(),
-            "sandbox denied write must have no side effect"
+            "sandbox denied write must have no side effect; target={:?}, result={result:#}",
+            std::fs::read(&target)
         );
     }
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires rebuilt Codex CLI and MoonBit; run the stage-one validation command"]
+#[ignore = "requires rebuilt Codex CLI and MoonBit; run mbtx/scripts/validate-evaluation.mbtx"]
 async fn cli_registers_and_executes_the_program_tool() -> Result<()> {
     let server = responses::start_mock_server().await;
     let home = tempfile::tempdir()?;

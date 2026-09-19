@@ -1,0 +1,50 @@
+///|
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
+  "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/json",
+}
+
+///|
+async fn main {
+  @fs.mkdir("search-input", recursive=true)
+  @fs.write_file("search-input/notes.txt", "ordinary\nneedle 雪\n")
+  let search = @shell.Cmd("rg", [
+    "--no-config", "--json", "--", "needle", "search-input",
+  ]).output()
+  guard search.exit_code() == 0 else { fail(search.stderr()) }
+  let mut matched = false
+  for line in search.stdout().split("\n") {
+    if line != "" {
+      match @json.parse(line.to_owned()) {
+        { "type": String("match"), .. } => matched = true
+        _ => ()
+      }
+    }
+  }
+  assert_true(matched)
+  let missing = @shell.Cmd("rg", [
+    "--no-config", "--json", "--", "absent", "search-input",
+  ]).output()
+  assert_eq(missing.exit_code(), 1)
+  let files = @shell.Cmd("rg", ["--no-config", "--files", "--", "search-input"]).output()
+  assert_eq(files.exit_code(), 0)
+  assert_eq(files.stdout(), "search-input/notes.txt\n")
+  let label = "λ雪\"quoted"
+  let minimum : Json = 2
+  let input : Json = [{ "score": 1 }, { "score": 3 }]
+  let result = @shell.Cmd("jq", [
+    "-c", "--arg", "label", label, "--argjson", "minimum", minimum.stringify(),
+    "map(select(.score >= $minimum)) | {label: $label, rows: .}",
+  ], stdin=@shell.Text(input.stringify())).output(max_output_bytes=8192)
+  guard result.exit_code() == 0 else { fail(result.stderr()) }
+  let expected : Json = { "label": label.to_json(), "rows": [{ "score": 3 }] }
+  assert_eq(@json.parse(result.stdout()), expected)
+  let redirected = @shell.Cmd("jq", ["-c", "."],
+    stdin=@shell.Text(expected.stringify()), stdout=@shell.ToFile("redirected.json"),
+  ).status()
+  assert_eq(redirected, 0)
+  assert_eq(@json.parse(@fs.read_file("redirected.json").text()), expected)
+  println("direct rg and jq verified")
+}

@@ -2087,6 +2087,12 @@
       "additionalProperties": false,
       "description": "Experimental programmable MoonBit tool. Executables are selected by the host.",
       "properties": {
+        "attempt_deadline_unix_ms": {
+          "description": "Absolute experiment deadline, shared by compilation and execution.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "dependency_cache": {
           "allOf": [
             {
@@ -2098,6 +2104,10 @@
         "enabled": {
           "default": false,
           "type": "boolean"
+        },
+        "execution_path": {
+          "description": "Host PATH used by MoonRun to resolve the policy's registered programs.",
+          "type": "string"
         },
         "moon": {
           "$ref": "#/definitions/AbsolutePathBuf"
@@ -2128,6 +2138,14 @@
             }
           ],
           "description": "Trusted read-only reference documents, available to both execution interfaces."
+        },
+        "runtime_policy": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Host-owned, read-only MoonRun policy applied to every Wasm execution."
         }
       },
       "type": "object"

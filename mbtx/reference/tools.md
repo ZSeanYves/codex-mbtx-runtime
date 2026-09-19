@@ -1,22 +1,25 @@
-# Installed public utilities
+# Task-declared direct utilities
 
-Both arms may use the same installed `sh`, `jq`, `rg` and `git`. Paths and binary
-hashes are frozen in the run manifest. Network access and delegation are disabled.
-No task-specific answer or oracle API is exposed by these references.
+The current task lists allowed programs and argument forms. Policy and this
+list come from the same declaration; installed tools are not automatically
+allowed. Paths/hashes are frozen in the bundle. No oracle or private answer
+utility is available. Network access and delegation are disabled.
 
-- `jq` parses JSON. `jq -s` reads several JSON inputs into an array. `jq -r`
-  emits unquoted strings; `jq -n --arg name "$value" '$name'` constructs JSON
-  safely. `--argjson` expects valid JSON. Inspect each command's exit status.
-- `rg -n PATTERN PATH` searches text with line numbers. `rg --files PATH`
-  enumerates files under the ordinary ignore rules. Use explicit paths/options
-  when a task requires a different file population. A no-match exit is 1.
-- `git status --porcelain`, `git diff`, and `git ls-files` inspect the isolated
-  task repository. The initial baseline is identical for both arms. Do not
-  inspect parent repositories, personal configuration or other attempts.
-- `sh -c SCRIPT` interprets Shell syntax; direct argv execution does not.
-- `./fixture-worker` is a fixed evaluation utility for tasks explicitly asking
-  for controlled work. Its task-visible command contract accompanies the input.
-  It contains no evaluation oracle or private answers.
+- jq handles JSON parsing, filtering, grouping and sorting. `-s` combines JSON
+  inputs; `-r` emits strings; `-n` constructs values without input. Use literal
+  `--arg name value` and `--argjson name valid_json`; check exit status.
+- rg uses `--no-config --json -- PATTERN PATH` or `--no-config --files -- PATH`
+  in MBTX. A no-match status is 1. Ordinary ignore rules apply.
+- Git is available only where explicitly declared, restricted to specified
+  read operations. Do not inspect parent repositories or personal config.
+- fixture-worker supports only task-declared actions. Its public contract
+  accompanies the input; it does not return evaluation answers.
+- Shell execution and Shell-specific documentation belong to the Shell arm.
 
-File permissions, approval, sandboxing and cancellation remain Codex's
-responsibility. Utility stderr is diagnostic evidence, not a task oracle.
+Use MoonBit for control flow and error handling around these tools. Substantial
+JSON processing need not be reimplemented by hand. See `reference:processes`
+and `reference:process-examples` for exact direct-call patterns.
+
+Do not use preprocessors, hooks, aliases, pagers, external diff or generic
+forwarders to launch programs indirectly. Process stderr is diagnostic evidence,
+not an oracle. Codex retains filesystem, cancellation and OS sandbox authority.

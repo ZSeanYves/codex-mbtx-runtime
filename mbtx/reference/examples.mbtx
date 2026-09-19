@@ -1,29 +1,48 @@
+///|
 import {
   "moonbitlang/async@0.21.3",
   "moonbitlang/async@0.21.3/fs",
   "moonbitlang/async@0.21.3/shell",
   "moonbitlang/core/json",
+  "moonbitlang/core/string",
 }
 
+///|
 async fn main {
+  assert_eq("a\r\nb\r\n".replace_all(old="\r\n", new="\n"), "a\nb\n")
+  assert_eq(@string.parse_int(" 42\r\n".trim()), 42)
+  let parsed : Int = @string.from_str("7")
+  assert_eq(parsed, 7)
+  let invalid_number = try {
+    ignore(@string.parse_int("not a number"))
+    false
+  } catch { _ => true }
+  assert_true(invalid_number)
   let fields = " alpha ,雪,beta,alpha".split(",").to_array()
   let counts : Map[String, Int] = Map([])
   for field in fields {
     let name = field.trim().to_owned()
     counts[name] = counts.get(name).unwrap_or(0) + 1
   }
+  counts["temporary"] = 1
+  counts.remove("temporary")
   let names = counts.keys().to_array()
   names.sort_by(fn(a, b) {
     let left = a.iter().to_array()
     let right = b.iter().to_array()
     for i in 0..<Int::min(left.length(), right.length()) {
       let order = left[i].compare(right[i])
-      if order != 0 { return order }
+      if order != 0 {
+        return order
+      }
     }
     left.length().compare(right.length())
   })
   assert_eq(names, ["alpha", "beta", "雪"])
-  let row : Json = { "name": names[0].to_json(), "count": counts["alpha"].to_json() }
+  let row : Json = {
+    "name": names[0].to_json(),
+    "count": counts["alpha"].to_json(),
+  }
   match @json.parse(row.stringify()) {
     { "name": String(name), "count": Number(count, ..), .. } => {
       assert_eq(name, "alpha")
@@ -31,14 +50,36 @@ async fn main {
     }
     _ => fail("unexpected JSON shape")
   }
-  let bad = try { ignore(@json.parse("{")); false } catch { _ => true }
+  let bad = try {
+    ignore(@json.parse("{"))
+    false
+  } catch {
+    _ => true
+  }
   assert_true(bad)
-  if !@fs.exists("example-data") { @fs.mkdir("example-data", recursive=true) }
+  if !@fs.exists("example-data") {
+    @fs.mkdir("example-data", recursive=true)
+  }
   @fs.write_file("example-data/row.json", row.stringify() + "\n")
   assert_eq(@json.parse(@fs.read_file("example-data/row.json").text()), row)
-  let child = @shell.Cmd("sh", ["-c", "cat; printf '%s' diagnostic >&2"], stdin=@shell.Text("λ雪\n")).output(max_output_bytes=8192)
+  assert_eq(@fs.readdir("example-data", include_hidden=true, sort=true), ["row.json"])
+  @fs.rename("example-data/row.json", "example-data/renamed.json", replace=true)
+  assert_true(@fs.exists("example-data/renamed.json"))
+  assert_eq(@fs.kind("example-data/renamed.json", follow_symlink=false), @fs.Regular)
+  @fs.write_file("example-data/binary", b"\xff\x00\r\n")
+  @fs.write_file("example-data/binary-copy", @fs.read_file("example-data/binary"))
+  assert_eq(@fs.file_size("example-data/binary-copy"), 4L)
+  assert_eq(@fs.read_file("example-data/binary-copy").binary(), b"\xff\x00\r\n")
+  @fs.remove("example-data/renamed.json")
+  @fs.rmdir("example-data", recursive=true)
+  let child = @shell.Cmd("jq", ["-Rr", "."], stdin=@shell.Text("λ雪\n")).output(
+    max_output_bytes=8192,
+  )
   assert_eq(child.exit_code(), 0)
   assert_eq(child.stdout(), "λ雪\n")
-  assert_eq(child.stderr(), "diagnostic")
+  assert_eq(child.stderr(), "")
+  let invalid = @shell.Cmd("jq", ["."], stdin=@shell.Text("{")).output()
+  assert_true(invalid.exit_code() != 0)
+  assert_true(invalid.stderr().length() > 0)
   println("reference APIs verified")
 }
