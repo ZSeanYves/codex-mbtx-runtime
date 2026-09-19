@@ -88,7 +88,10 @@ pub(crate) fn collect(directory: &Path) -> Result<Value> {
     let mut resources = Vec::new();
     let root = directory.join("resources");
     if root.exists() {
-        for entry in walkdir::WalkDir::new(&root).follow_links(false) {
+        for entry in walkdir::WalkDir::new(&root)
+            .follow_links(false)
+            .sort_by_file_name()
+        {
             let entry = entry?;
             if !entry.file_type().is_file() || entry.path().extension().is_none_or(|s| s != "json")
             {
@@ -134,6 +137,7 @@ pub(crate) fn collect(directory: &Path) -> Result<Value> {
         "seal":read_json(&directory.join("seal.json")).unwrap_or(Value::Null),
         "process":read_json(&directory.join("process.json")).unwrap_or(Value::Null),
         "worker_events":crate::evidence::worker_events(directory).unwrap_or(Value::Null),
+        "policy":read_json(&directory.join("policy-evidence.json")).unwrap_or(Value::Null),
         "scope":"All retained native payloads and output resources; model-private reasoning is not observed. HTTP wire bytes are in the raw evidence archive."}),
     )
 }

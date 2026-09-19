@@ -4,7 +4,7 @@ use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use flate2::Compression;
-use flate2::write::GzEncoder;
+use flate2::GzBuilder;
 use serde_json::Value;
 use serde_json::json;
 use std::io::Write;
@@ -24,8 +24,12 @@ pub(crate) fn render(model: &Value) -> Result<String> {
         .iter()
         .enumerate()
     {
-        let mut gzip = GzEncoder::new(Vec::new(), Compression::default());
-        serde_json::to_writer(&mut gzip, attempt)?;
+        let mut canonical = attempt.clone();
+        canonical.sort_all_objects();
+        let mut gzip = GzBuilder::new()
+            .mtime(0)
+            .write(Vec::new(), Compression::default());
+        serde_json::to_writer(&mut gzip, &canonical)?;
         gzip.flush()?;
         chunks.push_str(&format!(
             "<script type=\"application/octet-stream\" id=\"attempt-{index}\">{}</script>\n",
@@ -37,17 +41,31 @@ pub(crate) fn render(model: &Value) -> Result<String> {
         for (key, value) in attempt.as_object().context("attempt object")? {
             if !matches!(
                 key.as_str(),
-                "details" | "accounting" | "tool_outcomes" | "exchanges"
+                "details" | "accounting" | "tool_outcomes" | "exchanges" | "interaction"
             ) {
                 brief.insert(key.clone(), value.clone());
             }
         }
         let accounting = &attempt["accounting"];
-        brief.insert("accounting".into(), json!({"metrics":accounting["metrics"],"coverage":accounting["coverage"],"complete":accounting["complete"]}));
+        brief.insert("accounting".into(), json!({"metrics":accounting["metrics"],"observed":accounting["observed"],"coverage":accounting["coverage"],"complete":accounting["complete"]}));
+        let mut outcomes = attempt["tool_outcomes"].clone();
+        if let Some(outcomes) = outcomes.as_object_mut() {
+            outcomes.remove("details");
+        }
+        brief.insert("tool_outcomes".into(), outcomes);
+        let mut interaction = attempt["interaction"].clone();
+        if let Some(interaction) = interaction.as_object_mut() {
+            interaction.remove("decisions");
+        }
+        if !interaction.is_null() {
+            brief.insert("interaction".into(), interaction);
+        }
         brief.insert("chunk".into(), json!(index));
         summaries.push(Value::Object(brief));
     }
     summary.insert("attempts".into(), json!(summaries));
+    let mut summary = Value::Object(summary);
+    summary.sort_all_objects();
     // JSON inside a script element must escape the HTML parser's end tag.
     let data = serde_json::to_string(&summary)?
         .replace('<', "\\u003c")

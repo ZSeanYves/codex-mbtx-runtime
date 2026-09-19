@@ -209,10 +209,12 @@ pub(crate) async fn assess(root: &Path, analysis: &mut Analysis) -> Result<Vec<V
 }
 
 fn cell(value: &Value) -> String {
-    value
-        .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| value.to_string())
+    if let Some(text) = value.as_str() {
+        return text.to_owned();
+    }
+    let mut canonical = value.clone();
+    canonical.sort_all_objects();
+    canonical.to_string()
 }
 
 fn render(model: &Value, format: &str) -> Result<String> {
@@ -220,92 +222,11 @@ fn render(model: &Value, format: &str) -> Result<String> {
         return crate::report_html::render(model);
     }
     if format == "json" {
-        return Ok(serde_json::to_string_pretty(model)?);
+        let mut canonical = model.clone();
+        canonical.sort_all_objects();
+        return Ok(serde_json::to_string_pretty(&canonical)?);
     }
-    let mut rows = vec![vec![
-        "Task".into(),
-        "Scenario".into(),
-        "Input variant".into(),
-        "Arm".into(),
-        "Status".into(),
-        "Oracle".into(),
-        "Started steps".into(),
-        "Accepted steps".into(),
-        "Native request starts".into(),
-        "Observed upstream sends".into(),
-        "Tool calls".into(),
-        "Invocation failures".into(),
-        "MBTX compile failures".into(),
-        "MBTX execution failures".into(),
-        "Shell command failures".into(),
-        "Shared edit calls".into(),
-        "Evidence".into(),
-        "Cohort".into(),
-        "Complexity".into(),
-        "Pair".into(),
-        "Repeat".into(),
-        "Steps to success".into(),
-    ]];
-    for a in model["attempts"].as_array().context("attempts")? {
-        rows.push(vec![
-            cell(&a["task_id"]),
-            cell(&a["scenario"]),
-            cell(&a["variant"]),
-            cell(&a["arm"]),
-            cell(&a["status"]),
-            cell(&a["oracle"]["success"]),
-            cell(&a["accounting"]["metrics"]["agent_steps_started"]),
-            cell(&a["accounting"]["metrics"]["agent_steps"]),
-            cell(&a["accounting"]["metrics"]["model_requests"]),
-            cell(&a["upstream_requests_observed"]),
-            cell(&a["accounting"]["metrics"]["tool_calls"]),
-            cell(&a["accounting"]["metrics"]["tool_errors"]),
-            cell(&a["tool_outcomes"]["mbtx_compile_failures"]),
-            cell(&a["tool_outcomes"]["mbtx_execution_failures"]),
-            cell(&a["tool_outcomes"]["shell_command_failures"]),
-            cell(&a["tool_outcomes"]["shared_edit_calls"]),
-            cell(&a["evidence"]["directory"]),
-            cell(&a["cohort"]),
-            cell(&a["complexity"]),
-            cell(&a["pair_id"]),
-            cell(
-                &model["pairs"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|p| p["pair_id"] == a["pair_id"])
-                    .unwrap_or(&Value::Null)["repeat"],
-            ),
-            cell(&a["steps_to_success"]),
-        ]);
-    }
-    for pair in model["pairs"].as_array().into_iter().flatten() {
-        for arm in ["shell_tool", "mbtx_program"] {
-            if model["attempts"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|a| a["pair_id"] == pair["pair_id"] && a["arm"] == arm)
-            {
-                continue;
-            }
-            let mut row = vec!["null".to_owned(); rows[0].len()];
-            for (index, value) in [
-                (0, cell(&pair["task_id"])),
-                (1, cell(&pair["scenario"])),
-                (2, cell(&pair["variant"])),
-                (3, arm.into()),
-                (4, "not_started".into()),
-                (17, cell(&pair["cohort"])),
-                (18, cell(&pair["complexity"])),
-                (19, cell(&pair["pair_id"])),
-                (20, cell(&pair["repeat"])),
-            ] {
-                row[index] = value;
-            }
-            rows.push(row);
-        }
-    }
+    let rows = table::rows(model)?;
     if format == "csv" {
         return Ok(rows
             .iter()
@@ -369,7 +290,12 @@ fn render(model: &Value, format: &str) -> Result<String> {
         let mut cohorts = String::from(
             "| Cohort | Comparable pairs | Mean step difference | 95% interval | Mean step ratio | Ratio 95% interval |\n|---|---:|---:|---|---:|---|\n",
         );
-        for group in model["by_cohort"].as_array().into_iter().flatten() {
+        for group in model["by_cohort"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|_| model["by_track"].as_array().is_none_or(Vec::is_empty))
+        {
             let e = &group["conditional"];
             cohorts.push_str(&format!(
                 "| {} | {} | {} | {} | {} | {} |\n",
@@ -393,8 +319,9 @@ fn render(model: &Value, format: &str) -> Result<String> {
                 )
             })
             .collect::<Vec<_>>();
+        let calibration = summary::markdown(model);
         return Ok(format!(
-            "# Programmable MBTX evaluation report\n\n{summary}\n\n{population}\n\n{cohorts}\n\n{strata}\n\n## Attempt evidence\n\n{}\n|{}|\n{}\n\nAll recorded decisions, payloads and full output resources are embedded in report.html and report.json. Ordinal trajectory differences are not semantic alignment or causal attribution. Success-conditioned estimates may be selected by differential failure; repetitions are nested within input cases. Native evidence hashes and the frozen protocol are retained in the report method and per-attempt detail records.\n",
+            "# Programmable MBTX evaluation report\n\n{summary}\n\n{population}\n\n{cohorts}\n\n{strata}\n\n{calibration}\n\n## Attempt evidence\n\n{}\n|{}|\n{}\n\nAll recorded decisions, payloads and full output resources are embedded in report.html and report.json. Ordinal trajectory differences are not semantic alignment or causal attribution. Success-conditioned estimates may be selected by differential failure; repetitions are nested within input cases. Native evidence hashes and the frozen protocol are retained in the report method and per-attempt detail records.\n",
             table[0],
             vec!["---"; rows[0].len()].join("|"),
             table[1..].join("\n")
@@ -465,6 +392,12 @@ pub(crate) async fn generate(
     eprintln!("[eval] report: {}", output.display());
     Ok(output)
 }
+
+#[path = "report_table.rs"]
+mod table;
+
+#[path = "report_summary.rs"]
+mod summary;
 
 #[cfg(test)]
 #[path = "report_tests.rs"]
