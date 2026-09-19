@@ -16,7 +16,12 @@ fn tool_outcomes(trace : Json, results : Json, complete~ : Bool) -> Json {
   let mut reference_reads = 0
   let mut cache_hits = 0
   let mut compilations = 0
-  for id, tool in tools {
+  let mut launches = 0
+  let denials : Array[Json] = []
+  let ids = tools.keys().to_array()
+  ids.sort()
+  for id in ids {
+    let tool = tools[id]
     let kind = field(tool, "kind")
     if field(kind, "name") == Json::string("read_resource") {
       resource_reads += 1
@@ -38,6 +43,19 @@ fn tool_outcomes(trace : Json, results : Json, complete~ : Bool) -> Json {
       cache_hits += 1
     } else if field(output, "build") != Json::null() {
       compilations += 1
+    }
+    if field(output, "run") != Json::null() {
+      launches += 1
+    }
+    if field(output, "process_denial_diagnostic") is String(diagnostic) {
+      denials.push({
+        "tool_call_id": id.to_json(),
+        "diagnostic": diagnostic.to_json(),
+        "policy_sha256": field(output, "policy_sha256"),
+        "confidence": "observed",
+        "request_identity": Json::null(),
+        "interpretation": "Raw runtime stderr marker; not an authenticated child-process audit event",
+      })
     }
     match (field(output, "status"), field(output, "stage")) {
       (String("success"), String("completed")) => completed += 1
@@ -80,6 +98,10 @@ fn tool_outcomes(trace : Json, results : Json, complete~ : Bool) -> Json {
     "reference_reads_observed": reference_reads.to_json(),
     "mbtx_cache_hits": count(cache_hits),
     "mbtx_compilations": count(compilations),
+    "mbtx_compilations_observed": compilations.to_json(),
+    "mbtx_program_launches_observed": launches.to_json(),
+    "process_denial_diagnostics_observed": denials.to_json(),
+    "child_process_count": Json::null(),
     "mbtx_completed_calls": count(completed),
     "mbtx_compile_failures": count(compile_failed),
     "mbtx_execution_failures": count(execution_failed),

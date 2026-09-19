@@ -26,7 +26,10 @@ fn attempt_timing(facts : Json) -> Json {
   }
   let phases : Array[Json] = []
   if field(facts, "tool_results") is Object(tools) {
-    for id, result in tools {
+    let ids = tools.keys().to_array()
+    ids.sort()
+    for id in ids {
+      let result = tools[id]
       let output = field(result, "output")
       if field(output, "target") == Json::string("wasm") {
         phases.push({

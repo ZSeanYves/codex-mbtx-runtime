@@ -1,6 +1,7 @@
 ///|
-fn long_jobs(extended : Bool, variant : Int) -> LongCase {
+fn long_jobs(extended : Bool, variant : Int, basic? : Bool = false) -> LongCase {
   let n = if extended { 6 } else { 4 }
+  let labels = ["job-z", "job-b", "job-a", "job-e", "job-d", "job-c"]
   let jobs : Array[Json] = []
   let completed : Array[Json] = []
   let results : Array[Int] = []
@@ -8,23 +9,34 @@ fn long_jobs(extended : Bool, variant : Int) -> LongCase {
   let outputs : Map[String, Json] = Map([])
   let mut total = 0
   for i in 0..<n {
-    let id = "job-\{i}"
-    let deps : Array[String] = if i == 0 {
+    let id = if basic { labels[i] } else { "job-\{i}" }
+    let parents : Array[Int] = if basic {
+      match i {
+        1 | 2 => [0]
+        3 => [1, 2]
+        4 => [2]
+        5 => [3, 4]
+        _ => []
+      }
+    } else if i == 0 {
       []
     } else if extended && i > 1 {
-      ["job-\{i - 1}", "job-0"]
+      [i - 1, 0]
     } else {
-      ["job-\{i - 1}"]
+      [i - 1]
     }
-    let value = variant + i + 1
-    let result = value +
-      (if i == 0 {
-        0
-      } else if extended && i > 1 {
-        results[i - 1] + results[0]
+    let deps = parents.map(parent => {
+      if basic {
+        labels[parent]
       } else {
-        results[i - 1]
-      })
+        "job-\{parent}"
+      }
+    })
+    let value = variant + i + 1
+    let mut result = value
+    for parent in parents {
+      result += results[parent]
+    }
     results.push(result)
     total += result
     let retry = i == 1 || (extended && i == 3)
@@ -47,6 +59,20 @@ fn long_jobs(extended : Bool, variant : Int) -> LongCase {
     }
     events.push({ "action": "job", "id": id.to_json(), "exit_code": 0 })
   }
+  if basic {
+    completed.sort_by((a, b) => {
+      codepoint_compare(
+        match field(a, "id") {
+          String(id) => id
+          _ => abort("id")
+        },
+        match field(b, "id") {
+          String(id) => id
+          _ => abort("id")
+        },
+      )
+    })
+  }
   jobs.rev_in_place()
   jobs.push({
     "id": "job-disabled",
@@ -68,7 +94,7 @@ fn long_jobs(extended : Bool, variant : Int) -> LongCase {
       "total": total.to_json(),
     },
     reference: (
-      #|jq -r '.jobs|sort_by(.id)[]|select(.enabled)|.id' jobs.json > order.txt
+      #|jq -r '.jobs|map(select(.enabled)) as $nodes | reduce range(0;($nodes|length)) as $i ([]; . as $done | . + ([$nodes[] | select(.id as $id | $done|index($id)|not) | select(all(.deps[]; . as $id | $done|index($id))) | .id]|sort|.[0:1])) | .[]' jobs.json > order.txt
       #|while IFS= read -r id; do if ./fixture-worker job jobs.json "$id"; then :; else code=$?; test "$code" -eq 7; ./fixture-worker job jobs.json "$id"; fi; done < order.txt
       #|jq -s --slurpfile plan jobs.json '{completed:(sort_by(.id)|map({id,result})),skipped:([$plan[0].jobs[]|select(.enabled|not)|.id]|sort),total:([.[].result]|add)}' state/*.json > result.json
       #|
@@ -83,7 +109,11 @@ fn long_jobs(extended : Bool, variant : Int) -> LongCase {
 }
 
 ///|
-fn long_recovery(extended : Bool, variant : Int) -> LongCase {
+fn long_recovery(
+  extended : Bool,
+  variant : Int,
+  basic? : Bool = false,
+) -> LongCase {
   let n = if extended { 6 } else { 4 }
   let records : Array[Json] = []
   let outputs : Map[String, Json] = Map([])
@@ -94,7 +124,7 @@ fn long_recovery(extended : Bool, variant : Int) -> LongCase {
   let mut total = 0
   for i in 0..<n {
     let id = "record-\{i}"
-    let value = variant + i + 2
+    let value = if basic && i == n - 1 { -17 } else { variant + i + 2 }
     let generation = variant + 2
     ids.push(id)
     records.push({
@@ -121,6 +151,19 @@ fn long_recovery(extended : Bool, variant : Int) -> LongCase {
             "id": id.to_json(),
             "result": 0,
             "generation": (generation - 1).to_json(),
+          } : Json)
+        .stringify()
+        .to_json()
+    }
+    if basic && i == 2 {
+      files["state/" + id + ".json"] = "{invalid JSON\r\n"
+    }
+    if basic && i == 3 {
+      files["state/" + id + ".json"] = (
+          {
+            "id": id.to_json(),
+            "result": 0,
+            "generation": generation.to_json(),
           } : Json)
         .stringify()
         .to_json()
@@ -165,7 +208,7 @@ fn long_recovery(extended : Bool, variant : Int) -> LongCase {
       #| expected=$(jq -c --arg id "$id" '.[]|select(.id==$id)|{id,generation,result:(.value*.value)}' selected.json)
       #| if test -f "state/$id.json" && jq -e --argjson expected "$expected" '.==$expected' "state/$id.json" >/dev/null; then :; else ./fixture-worker recover records.json "$id"; printf '%s\n' "$id" >> executed.txt; fi
       #|done
-      #|rm -f state/*.pending
+      #|for path in state/*.pending; do if test -f "$path"; then rm -- "$path"; fi; done
       #|jq '{completed:map(.id),generation:(map(.generation)|max)}' selected.json > checkpoint.json
       #|jq -Rn '[inputs]' executed.txt > executed.json
       #|jq -s --slurpfile e executed.json '{completed:sort_by(.id),total:([.[].result]|add),executed:$e[0]}' state/*.json > result.json
@@ -182,16 +225,26 @@ fn long_recovery(extended : Bool, variant : Int) -> LongCase {
 }
 
 ///|
-fn long_forensics(extended : Bool, variant : Int) -> LongCase {
+fn long_forensics(
+  extended : Bool,
+  variant : Int,
+  basic? : Bool = false,
+) -> LongCase {
   let files : Map[String, Json] = {
     "streams.json": "{\"stdout\":\"stdout.input\",\"stderr\":\"stderr.input\"}",
   }
   let outputs : Map[String, Json] = Map([])
   let summaries : Array[Json] = []
   for stream in ["stdout", "stderr"] {
-    let n = (if extended { 3600 } else { 1200 }) + variant % 7
+    let n = (if extended && !basic { 3600 } else { 1200 }) + variant % 7
     let lines : Array[Json] = []
-    let errors = if extended { [17, n - 2] } else { [17] }
+    let errors = if basic {
+      [0, 17, n - 1]
+    } else if extended {
+      [17, n - 2]
+    } else {
+      [17]
+    }
     for i in 0..<n {
       lines.push({
         "seq": i.to_json(),
@@ -203,7 +256,8 @@ fn long_forensics(extended : Bool, variant : Int) -> LongCase {
         }).to_json(),
       })
     }
-    let text = lines.map(v => v.stringify()).join("\n") + "\n"
+    let newline = if basic && stream == "stderr" { "\r\n" } else { "\n" }
+    let text = lines.map(v => v.stringify()).join(newline) + newline
     files[stream + ".input"] = text.to_json()
     outputs[stream + ".log"] = text.to_json()
     summaries.push({
@@ -215,14 +269,16 @@ fn long_forensics(extended : Bool, variant : Int) -> LongCase {
         (
           {
             "seq": i.to_json(),
-            "context": [lines[i - 1], lines[i], lines[i + 1]],
+            "context": lines[Int::max(0, i - 1):Int::min(n, i + 2)]
+            .to_owned()
+            .to_json(),
           } : Json)
       })
       .to_json(),
     })
   }
   let base = long_plain({
-    goal: "Run ./fixture-worker emit streams.json and preserve its complete separate stdout/stderr bytes in stdout.log and stderr.log. Large previews are insufficient evidence of completeness. Parse the emitted JSONL records. For each ERROR, retain exactly its preceding/current/following record in that stream, preserving per-stream order. Report record counts, full last records (including Unicode), and findings. Verify the saved logs exactly match their corresponding immutable .input files, including trailing newlines. Do not merge streams or sort away their order. Write result.json with stdout first, then stderr. The emitting worker must actually run and is independently observed.",
+    goal: "Run ./fixture-worker emit streams.json and preserve its complete separate stdout/stderr bytes in stdout.log and stderr.log. Large previews are insufficient evidence of completeness. Parse the emitted JSONL records. For each ERROR, retain its preceding/current/following record when present (first and last records have only one neighbor), preserving per-stream order. Report record counts, full last records (including Unicode), and findings. Verify the saved logs exactly match their corresponding immutable .input files, including trailing newlines. Do not merge streams or sort away their order. Write result.json with stdout first, then stderr. The emitting worker must actually run and is independently observed.",
     schema: "{streams:[{stream:string,records:integer,tail:object,findings:[{seq:integer,context:object[]}]}]}",
     files,
     expected: { "streams": summaries.to_json() },
@@ -230,8 +286,8 @@ fn long_forensics(extended : Bool, variant : Int) -> LongCase {
       #|./fixture-worker emit streams.json > stdout.log 2> stderr.log
       #|cmp stdout.input stdout.log
       #|cmp stderr.input stderr.log
-      #|jq -s --arg stream stdout '. as $rows | {stream:$stream,records:length,tail:last,findings:[to_entries[]|select(.value.level=="ERROR")|.key as $i|{seq:.value.seq,context:$rows[$i-1:$i+2]}]}' stdout.log > stdout-summary.json
-      #|jq -s --arg stream stderr '. as $rows | {stream:$stream,records:length,tail:last,findings:[to_entries[]|select(.value.level=="ERROR")|.key as $i|{seq:.value.seq,context:$rows[$i-1:$i+2]}]}' stderr.log > stderr-summary.json
+      #|jq -s --arg stream stdout '. as $rows | {stream:$stream,records:length,tail:last,findings:[to_entries[]|select(.value.level=="ERROR")|.key as $i|{seq:.value.seq,context:$rows[([$i-1,0]|max):$i+2]}]}' stdout.log > stdout-summary.json
+      #|jq -s --arg stream stderr '. as $rows | {stream:$stream,records:length,tail:last,findings:[to_entries[]|select(.value.level=="ERROR")|.key as $i|{seq:.value.seq,context:$rows[([$i-1,0]|max):$i+2]}]}' stderr.log > stderr-summary.json
       #|jq -s '{streams:.}' stdout-summary.json stderr-summary.json > result.json
       #|
     ),

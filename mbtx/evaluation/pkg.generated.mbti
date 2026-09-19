@@ -12,12 +12,6 @@ pub fn collection_gate(Array[Json]) -> Json
 
 pub fn evaluate_request(Json) -> Json raise
 
-pub fn long_protocol(Bool) -> Json
-
-pub fn pilot_protocol() -> Json
-
-pub fn study_protocol(String) -> Json raise
-
 pub fn task_oracle(Json, Json) -> Json raise
 
 // Errors

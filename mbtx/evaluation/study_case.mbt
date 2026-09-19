@@ -23,20 +23,3 @@ fn codepoint_compare(a : String, b : String) -> Int {
   }
   left.length().compare(right.length())
 }
-
-///|
-fn study_case(
-  goal : String,
-  schema : String,
-  input : Json,
-  expected : Json,
-  jq : String,
-) -> StudyCase {
-  {
-    goal,
-    schema,
-    files: { "input.json": (input.stringify() + "\n").to_json() },
-    expected,
-    reference: "jq '" + jq + "' input.json > result.json\n",
-  }
-}

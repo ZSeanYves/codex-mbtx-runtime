@@ -1,5 +1,9 @@
 ///|
-fn long_reconciliation(extended : Bool, variant : Int) -> LongCase {
+fn long_reconciliation(
+  extended : Bool,
+  variant : Int,
+  basic? : Bool = false,
+) -> LongCase {
   let n = if extended { 6 } else { 3 }
   let json_lines : Array[String] = []
   let csv = StringBuilder()
@@ -67,6 +71,44 @@ fn long_reconciliation(extended : Bool, variant : Int) -> LongCase {
     total -= 3
     rejected.push({ "source_key": "refund-bad", "reason": "missing_invoice" })
   }
+  if basic {
+    // Physical line locators identify records that cannot provide a source key.
+    json_lines.push("")
+    for text in ["{broken", "7", "{}"] {
+      json_lines.push(text)
+      rejected.push({
+        "source_key": "source.jsonl:\{json_lines.length()}".to_json(),
+        "reason": "invalid",
+      })
+    }
+    let line = csv.to_string().split("\n").count()
+    csv.write_string("bad-width,too,few\n")
+    rejected.push({
+      "source_key": "source.csv:\{line}".to_json(),
+      "reason": "invalid",
+    })
+    csv.write_string(
+      "invalid-zero,bad-zero,alpha,0,USD,1,invoice,\ninvalid-fraction,bad-fraction,alpha,1.5,USD,1,invoice,\ninvalid-currency,bad-currency,alpha,10,XXX,1,invoice,\n",
+    )
+    for key in ["invalid-zero", "invalid-fraction", "invalid-currency"] {
+      rejected.push({ "source_key": key.to_json(), "reason": "invalid" })
+    }
+    // A same-revision conflict exercises the declared Unicode tie breaker.
+    json_lines.push(
+      (
+        {
+          "source_key": "tie-雪",
+          "id": "invoice-1",
+          "account": "beta",
+          "amount": (variant + 12).to_json(),
+          "currency": "EUR",
+          "revision": 1,
+          "kind": "invoice",
+          "reference": "",
+        } : Json).stringify(),
+    )
+    rejected.push({ "source_key": "json-1", "reason": "superseded" })
+  }
   rejected.sort_by((a, b) => {
     codepoint_compare(
       string_field(a, "source_key") catch {
@@ -84,11 +126,15 @@ fn long_reconciliation(extended : Bool, variant : Int) -> LongCase {
     "rejected": rejected.to_json(),
   }
   let base = long_plain({
-    goal: "Reconcile transactions from source.jsonl and source.csv using accounts.json. CSV is unquoted UTF-8 with the supplied header and no embedded commas/newlines. Normalize integer amount and revision. Reject malformed records, unknown accounts/currencies, nonpositive invoice amounts and nonnegative refunds. Select one valid record per id by greatest revision, breaking ties by source_key in Unicode code-point lexical order (greatest wins); mark the other valid records superseded. After selection, accept a refund only if its reference identifies a selected invoice for the same account; otherwise reject it as missing_invoice. Convert accepted amounts using the integer base-currency rates. Write ledger.json sorted by id, rejected.json sorted by source_key with reason invalid/superseded/missing_invoice, and result.json including per-account totals (including zero) and overall total. Preserve original records and verify reconciliation totals.",
+    goal: "Reconcile transactions from source.jsonl and source.csv using accounts.json. CSV is unquoted UTF-8 with the supplied header and no embedded commas/newlines. Accept LF or CRLF and skip blank data lines while retaining physical 1-based line numbers. A CSV row with the wrong column count, or a malformed/non-object JSONL row or one lacking a nonempty string source_key, is rejected as invalid with source_key SOURCE_FILE:LINE (for example source.jsonl:7). Other rows retain their supplied unique source_key. Normalize amount and revision from integer JSON numbers or signed decimal integer strings (no fractional or exponent strings). Reject malformed records, unknown accounts/currencies, nonpositive invoice amounts and nonnegative refunds. Select one valid record per id by greatest revision, breaking ties by source_key in Unicode code-point lexical order (greatest wins); mark the other valid records superseded. After selection, accept a refund only if its reference identifies a selected invoice for the same account; otherwise reject it as missing_invoice. Convert accepted amounts using the integer base-currency rates. Write ledger.json sorted by id, rejected.json sorted by source_key with reason invalid/superseded/missing_invoice, and result.json including per-account totals (including zero) and overall total. Preserve original records and verify reconciliation totals.",
     schema: "{ledger:[{id:string,account:string,base_amount:integer,kind:string}],totals:{account:integer},total:integer,rejected:[{source_key:string,reason:string}]}",
     files: {
-      "source.jsonl": (json_lines.join("\n") + "\n").to_json(),
-      "source.csv": csv.to_string().to_json(),
+      "source.jsonl": (json_lines.join(if basic { "\r\n" } else { "\n" }) + "\n").to_json(),
+      "source.csv": (if basic {
+        csv.to_string().replace_all(old="\n", new="\r\n")
+      } else {
+        csv.to_string()
+      }).to_json(),
       "accounts.json": (
         { "accounts": ["alpha", "beta"], "rates": { "USD": 1, "EUR": 2 } } :
         Json)
@@ -97,11 +143,13 @@ fn long_reconciliation(extended : Bool, variant : Int) -> LongCase {
     },
     expected,
     reference: (
-      #|jq -Rn '[inputs|split(",")] | .[0] as $h | [.[1:][] | . as $v | reduce range(0;($h|length)) as $i ({}; .[$h[$i]]=$v[$i])]' source.csv > csv-normalized.json
-      #|jq -s '.' source.jsonl > json-normalized.json
+      #|jq -Rn '[inputs|rtrimstr("\r")] | .[0]|split(",")' source.csv > header.json
+      #|jq -Rn --slurpfile h header.json '[inputs|rtrimstr("\r")]|to_entries|map(select(.key>0 and .value!="")|. as $line|(.value|split(",")) as $v|if ($v|length)!=($h[0]|length) then {source_key:("source.csv:"+($line.key+1|tostring)),invalid:true} else reduce range(0;($h[0]|length)) as $i ({}; .[$h[0][$i]]=$v[$i]) end)' source.csv > csv-normalized.json
+      #|jq -Rn '[inputs|rtrimstr("\r")]|to_entries|map(select(.value!="")|. as $line|(try (.value|fromjson) catch null) as $row|if ($row|type)=="object" and ($row.source_key|type)=="string" and $row.source_key!="" then $row else {source_key:("source.jsonl:"+($line.key+1|tostring)),invalid:true} end)' source.jsonl > json-normalized.json
       #|jq -n --slurpfile c accounts.json --slurpfile a csv-normalized.json --slurpfile b json-normalized.json '
-      #| $c[0] as $cfg | ($a[0]+$b[0] | map(.amount=(try (.amount|tonumber) catch null) | .revision=(try (.revision|tonumber) catch null))) as $all |
-      #| def valid: . as $r | ($r.id|type=="string") and ($cfg.accounts|index($r.account)!=null) and ($cfg.rates[$r.currency]!=null) and ($r.amount|type=="number") and ($r.revision|type=="number") and ($r.amount|floor==.) and ($r.revision|floor==.) and (($r.kind=="invoice" and $r.amount>0) or ($r.kind=="refund" and $r.amount<0));
+      #| def integer: if type=="number" then . elif type=="string" and test("^-?[0-9]+$") then tonumber else null end;
+      #| $c[0] as $cfg | ($a[0]+$b[0] | map(.amount=(try (.amount|integer) catch null) | .revision=(try (.revision|integer) catch null))) as $all |
+      #| def valid: try (. as $r | ($r.id|type=="string") and ($r.id!="") and ($cfg.accounts|index($r.account)!=null) and ($cfg.rates[$r.currency]!=null) and ($r.amount|type=="number") and ($r.revision|type=="number") and ($r.amount|floor==.) and ($r.revision|floor==.) and (($r.kind=="invoice" and $r.amount>0) or ($r.kind=="refund" and $r.amount<0))) catch false;
       #| ($all|map(select(valid))) as $valid | ($valid|sort_by(.id,.revision,.source_key)|group_by(.id)|map(last)) as $selected |
       #| def accepted: . as $r | .kind=="invoice" or any($selected[]; .kind=="invoice" and .id==$r.reference and .account==$r.account);
       #| ($selected|map(select(accepted))|sort_by(.id)|map({id,account,base_amount:(.amount*$cfg.rates[.currency]),kind})) as $ledger |
@@ -121,7 +169,11 @@ fn long_reconciliation(extended : Bool, variant : Int) -> LongCase {
 }
 
 ///|
-fn long_incident(extended : Bool, variant : Int) -> LongCase {
+fn long_incident(
+  extended : Bool,
+  variant : Int,
+  basic? : Bool = false,
+) -> LongCase {
   let events : Array[Json] = []
   let requests : Array[Json] = []
   let incidents : Array[Json] = []
@@ -157,7 +209,22 @@ fn long_incident(extended : Bool, variant : Int) -> LongCase {
       } else {
         "upstream"
       }).to_json(),
-      "evidence": [seq.to_json(), (seq + 1).to_json()],
+      "evidence": if basic {
+        [
+          {
+            "seq": seq.to_json(),
+            "file": "app.jsonl",
+            "line": (i + 2).to_json(),
+          },
+          {
+            "seq": (seq + 1).to_json(),
+            "file": "retries.jsonl",
+            "line": (n - i + 1).to_json(),
+          },
+        ]
+      } else {
+        [seq.to_json(), (seq + 1).to_json()]
+      },
     })
   }
   // Deliberately reverse file order and include a duplicate and an untracked request.
@@ -174,7 +241,7 @@ fn long_incident(extended : Bool, variant : Int) -> LongCase {
     "code": "upstream_502",
     "config": "normal",
   })
-  long_plain({
+  let base = long_plain({
     goal: "Investigate tracked requests in requests.json by correlating app.jsonl and retries.jsonl with configurations.json. Ignore untracked requests. Deduplicate identical request/seq events, sort by sequence and retain evidence sequence numbers. Count distinct attempt numbers, classify a request recovered if the last event is ok and failed otherwise. Attribute its first error to configuration_timeout when code is timeout and the event's referenced config timeout_ms is less than that request's budget_ms; other timeout is deadline, upstream_502 is upstream, all other errors are unknown. Do not use file order as event order. Emit one incident per tracked request in lexical request order, plus failed and recovered counts; verify counts against the tracked population.",
     schema: "{incidents:[{request:string,status:string,attempts:integer,cause:string,evidence:integer[]}],failed:integer,recovered:integer}",
     files: {
@@ -199,4 +266,37 @@ fn long_incident(extended : Bool, variant : Int) -> LongCase {
       #|
     ),
   })
+  if !basic {
+    return base
+  }
+  let files = base.instance.files.copy()
+  files["app.jsonl"] = ("\n" +
+  (match files["app.jsonl"] {
+    String(text) => text
+    _ => abort("log")
+  })).to_json()
+  files["retries.jsonl"] = ("{malformed\r\n" +
+  (match files["retries.jsonl"] {
+    String(text) => text
+    _ => abort("log")
+  }).replace_all(old="\n", new="\r\n")).to_json()
+  {
+    ..base,
+    instance: {
+      ..base.instance,
+      files,
+      goal: base.instance.goal +
+      " Skip blank or malformed JSONL lines. Evidence entries are {seq,file,line}, where file is app.jsonl or retries.jsonl and line is the physical 1-based line number including skipped lines. If an identical event has multiple locations, keep the lexically first file and then smallest line. Do not invent locators from event sequence numbers.",
+      schema: "{incidents:[{request:string,status:string,attempts:integer,cause:string,evidence:[{seq:integer,file:string,line:integer}]}],failed:integer,recovered:integer}",
+      reference: base.instance.reference
+      .replace_all(
+        old="jq -s 'unique_by(.request,.seq)'",
+        new="jq -Rn '[inputs | input_filename as $file | input_line_number as $line | try (fromjson + {file:$file,line:$line}) catch empty] | sort_by(.file,.line) | unique_by(.request,.seq)'",
+      )
+      .replace_all(
+        old="evidence:[$events[].seq]",
+        new="evidence:[$events[]|{seq,file,line}]",
+      ),
+    },
+  }
 }

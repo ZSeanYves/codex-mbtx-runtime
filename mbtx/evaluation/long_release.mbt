@@ -1,5 +1,9 @@
 ///|
-fn long_release(extended : Bool, variant : Int) -> LongCase {
+fn long_release(
+  extended : Bool,
+  variant : Int,
+  basic? : Bool = false,
+) -> LongCase {
   let contents = ["alpha\n", "beta 雪\n"]
   let hashes = [
     "b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060", "b1ee4947020ae104c19c55222e3141d61dbbfa4d3dfd932af986506849f6dada",
@@ -7,7 +11,11 @@ fn long_release(extended : Bool, variant : Int) -> LongCase {
   let version = "v\{variant + 2}"
   let n = if extended { 5 } else { 3 }
   let files : Map[String, Json] = { "release/obsolete.txt": "old artifact\n" }
+  if basic {
+    files["release/unrelated 雪.dat"] = "preserve unrelated\r\n"
+  }
   let outputs : Map[String, Json] = Map([])
+  let worker_events : Array[Json] = []
   let specs : Array[Json] = []
   let manifest : Array[Json] = []
   let repaired : Array[String] = []
@@ -40,6 +48,23 @@ fn long_release(extended : Bool, variant : Int) -> LongCase {
         "version": version.to_json(),
         "priority": 9,
       })
+    }
+    if basic {
+      let tie = "candidates/tied component-\{i}.dat"
+      files[tie] = contents[i % 2].to_json()
+      candidates.push({
+        "path": tie.to_json(),
+        "version": version.to_json(),
+        "priority": 2,
+      })
+      for path in [source, target] {
+        worker_events.push({
+          "action": "hash",
+          "id": Json::null(),
+          "exit_code": 0,
+          "args": ["hash", path.to_json()],
+        })
+      }
     }
     specs.push({
       "target": target.to_json(),
@@ -84,7 +109,7 @@ fn long_release(extended : Bool, variant : Int) -> LongCase {
       #| actual=$(./fixture-worker hash "$target"); test "$actual" = "$expected"
       #| jq -n --arg path "$target" --arg sha256 "$actual" --arg source "$selected" '{path:$path,sha256:$sha256,source:$source}' >> release-results.jsonl
       #|done
-      #|jq -r '.obsolete[]' release-plan.json | while IFS= read -r path; do rm -f "$path"; done
+      #|jq -r '.obsolete[]' release-plan.json | while IFS= read -r path; do if test -f "$path"; then rm -- "$path"; fi; done
       #|jq -Rn '[inputs]' repaired.txt > repaired.json
       #|jq -s --slurpfile p release-plan.json --slurpfile r repaired.json '{version:$p[0].version,files:sort_by(.path),removed:($p[0].obsolete|sort),repaired:($r[0]|sort)}' release-results.jsonl > result.json
       #|cp result.json manifest.json
@@ -95,6 +120,7 @@ fn long_release(extended : Bool, variant : Int) -> LongCase {
     ..base,
     outputs,
     mutable_inputs: mutable,
+    worker_events,
     absent: ["release/obsolete.txt"],
   }
 }

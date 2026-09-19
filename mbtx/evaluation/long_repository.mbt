@@ -1,17 +1,32 @@
 ///|
-fn long_impact(extended : Bool, variant : Int) -> LongCase {
+fn long_impact(
+  extended : Bool,
+  variant : Int,
+  basic? : Bool = false,
+) -> LongCase {
   let count = if extended { 7 } else { 4 }
+  let labels = [
+    "zeta", "bravo", "alpha", "echo", "delta", "charlie", "unrelated",
+  ]
   let components : Array[Json] = []
   let checks : Array[Json] = []
   let affected : Array[String] = []
   let blocked : Array[String] = []
   let check_results : Array[Json] = []
   for i in 0..<count {
-    let id = "component-\{i}"
+    let id = if basic { "component-" + labels[i] } else { "component-\{i}" }
     components.push({
       "id": id.to_json(),
       "prefix": ("src/" + id + "/").to_json(),
-      "deps": if i == 0 {
+      "deps": if basic {
+        (match i {
+          1 | 2 => ["component-zeta"]
+          3 => ["component-bravo", "component-alpha"]
+          4 => ["component-alpha"]
+          5 => ["component-echo", "component-delta"]
+          _ => []
+        }).to_json()
+      } else if i == 0 {
         []
       } else {
         ["component-\{i - 1}".to_json()]
@@ -33,19 +48,42 @@ fn long_impact(extended : Bool, variant : Int) -> LongCase {
       blocked.push(id)
     }
   }
+  if basic {
+    affected.clear()
+    check_results.clear()
+    blocked.clear()
+    for i in [0, 2, 1, 4, 3, 5] {
+      affected.push("component-" + labels[i])
+      check_results.push(checks[i])
+      if field(checks[i], "status") == Json::string("failed") {
+        blocked.push("component-" + labels[i])
+      }
+    }
+  }
   let changes : Array[Json] = [
-    { "path": "src/component-0/value.mbt", "status": "modified" },
+    {
+      "path": (if basic {
+        "src/component-zeta/value.mbt"
+      } else {
+        "src/component-0/value.mbt"
+      }).to_json(),
+      "status": "modified",
+    },
     { "path": "docs/ignored.md", "status": "modified" },
   ]
   if extended {
     changes.push({
       "path": "generated/value.mbt",
-      "old_path": "src/component-0/old.mbt",
+      "old_path": (if basic {
+        "src/component-zeta/old.mbt"
+      } else {
+        "src/component-0/old.mbt"
+      }).to_json(),
       "status": "renamed",
     })
   }
   let expected : Json = {
-    "direct": ["component-0"],
+    "direct": [(if basic { "component-zeta" } else { "component-0" }).to_json()],
     "affected": affected.to_json(),
     "checks": check_results.to_json(),
     "blocked": blocked.to_json(),
@@ -70,7 +108,7 @@ fn long_impact(extended : Bool, variant : Int) -> LongCase {
       #| $c[0] as $cfg | $cfg.components as $nodes |
       #| [$d[0][] | (.path,.old_path // empty) | . as $p | select(all($cfg.excluded[]; . as $e | $p|startswith($e)|not)) | $nodes[] | select(.prefix as $q | $p|startswith($q)) | .id] | unique as $direct |
       #| (reduce range(0;($nodes|length)) as $i ($direct; . as $seen | (. + [$nodes[] | select(any(.deps[]; . as $d | $seen|index($d))) | .id]) | unique)) as $all |
-      #| (reduce range(0;($nodes|length)) as $i ([]; . as $done | . + ([$nodes[] | select(.id as $id | ($all|index($id)) and ($done|index($id)|not)) | select(all(.deps[]; . as $dep | $done|index($dep))) | .id]|sort))) as $ordered |
+      #| (reduce range(0;($nodes|length)) as $i ([]; . as $done | . + ([$nodes[] | select(.id as $id | ($all|index($id)) and ($done|index($id)|not)) | select(all(.deps[]; . as $dep | $done|index($dep))) | .id]|sort|.[0:1]))) as $ordered |
       #| {direct:$direct,affected:$ordered,checks:[$ordered[] as $id | $t[0][] | select(.component==$id)],blocked:[$ordered[] as $id | $t[0][] | select(.component==$id and .status=="failed")|.component]}' > result.json
       #|
     ),
@@ -78,12 +116,23 @@ fn long_impact(extended : Bool, variant : Int) -> LongCase {
 }
 
 ///|
-fn long_migration(extended : Bool, variant : Int) -> LongCase {
+fn long_migration(
+  extended : Bool,
+  variant : Int,
+  basic? : Bool = false,
+) -> LongCase {
   let defaults : Json = {
     "timeout_s": 5,
     "retries": 2,
     "enabled": "true",
     "labels": { "team": "core", "note": "keep 雪" },
+  }
+  if basic {
+    let fields = match defaults {
+      Object(fields) => fields
+      _ => abort("defaults")
+    }
+    fields["retention"] = { "days": 17, "note": "preserve 雪" }
   }
   let layers : Array[Json] = [
     { "id": "base", "parent": Json::null(), "values": defaults },
@@ -124,6 +173,13 @@ fn long_migration(extended : Bool, variant : Int) -> LongCase {
     "retries": (if extended { 4 } else { variant % 4 + 1 }).to_json(),
     "enabled": true,
     "labels": { "team": "core", "note": "keep 雪" },
+  }
+  if basic {
+    let fields = match config {
+      Object(fields) => fields
+      _ => abort("config")
+    }
+    fields["retention"] = { "days": 17, "note": "preserve 雪" }
   }
   let expected : Json = {
     "config": config,

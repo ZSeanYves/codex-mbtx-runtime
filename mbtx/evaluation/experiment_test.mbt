@@ -1,10 +1,14 @@
 ///|
 test "oracle rejects a plausible wrong answer and modified inputs" {
-  let protocol = @evaluation.pilot_protocol()
-  guard protocol is { "tasks": Array(tasks), .. } else { fail("tasks") }
-  let task = tasks[1]
-  guard task is { "files": Object(inputs), "expected": expected, .. } else {
-    fail("task")
+  let inputs : Map[String, Json] = { "orders.json": "[1,2]" }
+  let expected : Json = {
+    "customers": { "alpha": 14, "beta": 15 },
+    "total": 29,
+  }
+  let task : Json = {
+    "files": inputs.to_json(),
+    "expected": expected,
+    "output": "result.json",
   }
   let files = inputs.copy()
   files["result.json"] = expected.stringify().to_json()
@@ -94,10 +98,11 @@ test "worker observation failure is a harness failure even if final artifacts ma
 
 ///|
 test "relay error preserves successful oracle without becoming an MBTX error" {
-  guard @evaluation.pilot_protocol() is { "tasks": Array(tasks), .. } else {
-    fail("tasks")
+  let task : Json = {
+    "files": {},
+    "output": "settings.json",
+    "expected": { "port": 8080, "retries": 2 },
   }
-  let task = tasks[5]
   let facts : Json = {
     "attempt_id": "a",
     "pair_id": "p",
