@@ -1,24 +1,86 @@
+///|
 import {
   "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs",
   "moonbitlang/async@0.21.3/shell",
   "moonbitlang/core/env",
 }
 
+///|
 async fn main {
-  let environment : Map[String,String] = {"CARGO_PROFILE_DEV_DEBUG":"0","CARGO_PROFILE_TEST_DEBUG":"0","CARGO_INCREMENTAL":"0","CARGO_BUILD_JOBS":"4","NO_PROXY":"127.0.0.1,localhost,::1","no_proxy":"127.0.0.1,localhost,::1"}
-  for script in ["prepare-evaluation","collect-study","collect-pilot","validate-long-study","validate-long-fixtures","validate-observation","validate-reference","validate-retries","package-evidence"] {
-    @shell.Cmd("moon",["check","mbtx/scripts/"+script+".mbtx"]).run()
+  let environment : Map[String, String] = {
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "4",
+    "NO_PROXY": "127.0.0.1,localhost,::1",
+    "no_proxy": "127.0.0.1,localhost,::1",
   }
-  @shell.Cmd("moon",["check","--target","wasm"],cwd="mbtx").run()
-  @shell.Cmd("moon",["test","--target","wasm"],cwd="mbtx").run()
-  @shell.Cmd("just",["test","-p","codex-mbtx-eval","-p","codex-mbtx-extension","-p","codex-tools","-p","codex-rollout-trace","--locked","--retries=0"],env=environment).run()
-  if @env.args().contains("--fast") {println("Fast evaluation checks passed; no relay requests or full Codex build.");return}
-  @shell.Cmd("moon",["run","mbtx/scripts/prepare-evaluation.mbtx"]).run()
-  @shell.Cmd("moon",["run","mbtx/scripts/validate-long-fixtures.mbtx"]).run()
-  @shell.Cmd("just",["test","-p","codex-core","--test","all","-E","test(suite::mbtx)","--run-ignored","all","--locked"],env=environment).run()
-  @shell.Cmd("moon",["run","mbtx/scripts/validate-long-study.mbtx"]).run()
-  @shell.Cmd("moon",["run","mbtx/scripts/validate-retries.mbtx"]).run()
-  @shell.Cmd("moon",["run","mbtx/scripts/validate-observation.mbtx"]).run()
-  @shell.Cmd("moon",["run","mbtx/scripts/prepare-evaluation.mbtx"]).run()
-  println("Long-study offline validation completed. Linux online pilot and formal data are separate research work.")
+  for
+    script in [
+      "prepare-evaluation", "collect-study", "validate-long-study", "validate-long-fixtures",
+      "validate-observation", "validate-reference", "validate-retries", "package-evidence",
+    ] {
+    @shell.Cmd("moon", ["check", "mbtx/scripts/" + script + ".mbtx"]).run()
+  }
+  @shell.Cmd("moon", ["run", "mbtx/scripts/validate-reference.mbtx"]).run()
+  @shell.Cmd("node", ["--test", "codex-rs/mbtx-eval/web/report.test.cjs"]).run()
+  @shell.Cmd("moon", ["check", "--target", "wasm"], cwd="mbtx").run()
+  @shell.Cmd("moon", ["test", "--target", "wasm"], cwd="mbtx").run()
+  @shell.Cmd(
+    "just",
+    [
+      "test", "-p", "codex-mbtx-eval", "-p", "codex-mbtx-extension", "-p", "codex-tools",
+      "-p", "codex-rollout-trace", "--locked", "--retries=0",
+    ],
+    env=environment,
+  ).run()
+  if @env.args().contains("--fast") {
+    println(
+      "Fast evaluation checks passed; no relay requests or full Codex build.",
+    )
+    return
+  }
+  @shell.Cmd("moon", ["run", "mbtx/scripts/prepare-evaluation.mbtx"]).run()
+  environment["MBTX_TEST_BUNDLE"] = @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
+  validate_steps(environment["MBTX_TEST_BUNDLE"])
+  @shell.Cmd("just", ["test", "-p", "codex-mbtx-eval", "-E", "test(submission::tests)", "--run-ignored", "all", "--locked", "--retries=0"], env=environment).run()
+  @shell.Cmd("moon", ["run", "mbtx/scripts/validate-long-fixtures.mbtx"]).run()
+  @shell.Cmd(
+    "just",
+    [
+      "test", "-p", "codex-core", "--test", "all", "-E", "test(suite::mbtx)", "--run-ignored",
+      "all", "--locked",
+    ],
+    env=environment,
+  ).run()
+  @shell.Cmd("moon", ["run", "mbtx/scripts/validate-long-study.mbtx"]).run()
+  @shell.Cmd("moon", ["run", "mbtx/scripts/validate-retries.mbtx"]).run()
+  @shell.Cmd("moon", ["run", "mbtx/scripts/validate-observation.mbtx"]).run()
+  @shell.Cmd("moon", ["run", "mbtx/scripts/prepare-evaluation.mbtx"]).run()
+  println(
+    "V4 offline validation completed: basic and complexity tracks, 32 pairs / 64 prescribed attempts. This verifies execution and evidence, not autonomous model performance. No relay probe or online model request was made.",
+  )
+}
+
+///|
+async fn validate_steps(bundle : String) -> Unit {
+  let root = @fs.realpath(".") + "/_build/step-validation-v4/run-\{@env.now()}"
+  @fs.mkdir(root, recursive=true)
+  @shell.Cmd("just", ["test", "-p", "codex-core", "--test", "all", "-E", "test(suite::step_accounting::)", "--run-ignored", "all", "--test-threads=1", "--retries=0"], env={
+    "CODEX_ROLLOUT_TRACE_ROOT":root,
+    "CARGO_PROFILE_DEV_DEBUG":"0", "CARGO_PROFILE_TEST_DEBUG":"0",
+    "CARGO_INCREMENTAL":"0", "CARGO_BUILD_JOBS":"4",
+    "NO_PROXY":"localhost,127.0.0.1,::1", "no_proxy":"localhost,127.0.0.1,::1",
+  }).run()
+  let mut verified = 0
+  @fs.walk(root, max_concurrency=1, (path, files) => {
+    if files.contains("manifest.json") && files.contains("expected-steps.json") {
+      @shell.Cmd(bundle + "/codex", ["debug", "trace-reduce", path]).run()
+      @shell.Cmd(bundle + "/moonrun", [bundle + "/evaluation-model.wasm", "--", path + "/state.json", path + "/expected-steps.json"], stdout=@shell.ToFile(path + "/step-report.json")).run()
+      verified += 1
+    }
+  })
+  assert_eq(verified, 8)
+  println("Verified eight native decision-accounting trajectories: " + root)
 }

@@ -47,7 +47,7 @@ jobs:
           components: rustfmt
       - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
-          tool: just,cargo-nextest
+          tool: just,cargo-nextest,ripgrep
       - uses: moonbitlang/moonbit-docs/.github/actions/setup@474bc051f101bfe88d8d6a1889b2f49c60f78de0
       - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
         with:
@@ -57,6 +57,9 @@ jobs:
             codex-rs/target
           key: mbtx-fast-${{ runner.os }}-dev-debug0-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml', 'codex-rs/mbtx-eval/**', 'codex-rs/ext/mbtx/**') }}
           restore-keys: mbtx-fast-${{ runner.os }}-dev-debug0-
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "22"
       - run: moon run mbtx/scripts/validate-evaluation.mbtx --fast
       - run: cargo fmt --all -- --check
         working-directory: codex-rs
@@ -83,16 +86,24 @@ jobs:
             codex-rs/target
           key: mbtx-offline-${{ runner.os }}-wasm-dev-debug0-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml', 'codex-rs/**/*.rs', 'mbtx/**/*.mbt', 'mbtx/**/*.mbtx', 'mbtx/moon.mod') }}
           restore-keys: mbtx-fast-${{ runner.os }}-dev-debug0-
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "22"
       - run: moon run mbtx/scripts/validate-evaluation.mbtx
       - if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: programmable-mbtx-offline
+          name: programmable-mbtx-v4-offline
           path: |
-            _build/long-study-validation
+            _build/offline-validation-v4
+            _build/reference-validation
+            _build/fixture-validation-v4
             _build/retry-validation
             _build/observation-calibration
-            !_build/long-study-validation/**/workspaces/**
+            _build/step-validation-v4
+            !_build/offline-validation-v4/**/workspaces/**
+            !_build/offline-validation-v4/**/templates/**
+            !_build/fixture-validation-v4/**/workspaces/**
             !_build/retry-validation/**/workspaces/**
             !_build/observation-calibration/**/workspaces/**
             _build/evaluation-bundles/preparation-*.json

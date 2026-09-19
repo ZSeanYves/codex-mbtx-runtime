@@ -1,3 +1,4 @@
+///|
 import {
   "moonbitlang/async@0.21.3",
   "moonbitlang/async@0.21.3/fs",
@@ -6,57 +7,79 @@ import {
   "moonbitlang/core/json",
 }
 
+///|
+async fn put_files(work : String, files : Map[String, Json]) -> Unit {
+  for name, content in files {
+    guard content is String(text) else { fail("text input") }
+    let parts = name.split("/").map(p => p.to_owned()).to_array()
+    if parts.length()>1 {
+      let parent=work+"/"+parts[:parts.length()-1].join("/")
+      if !@fs.exists(parent) { @fs.mkdir(parent,recursive=true) }
+    }
+    @fs.write_file(work+"/"+name,text)
+  }
+}
+
+///|
+/// Fast semantic validation; actual sandbox and receipts are tested by replay.
 async fn main {
-  let repo = @fs.realpath(".")
-  let use_local = @env.args().contains("--local")
-  let bundle = if use_local { repo + "/codex-rs/target/debug" } else { @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned() }
-  let runtime = if use_local { "moonrun" } else { bundle + "/moonrun" }
-  let model = if use_local { repo + "/mbtx/_build/wasm/release/build/cmd/evaluation-model/evaluation-model.wasm" } else { bundle + "/evaluation-model.wasm" }
-  let worker = bundle + (if use_local { "/mbtx-fixture-worker" } else { "/fixture-worker" })
-  let root = repo + "/_build/long-fixture-validation/run-\{@env.now()}"
-  @fs.mkdir(root, recursive=true)
-  let mut checked = 0
-  for suite in ["long-study", "long-pilot"] {
-    let request : Json = {"schema_version":1,"op":"protocol","suite":suite.to_json()}
-    let response = @shell.Cmd(runtime,[model,"--","--worker"],stdin=@shell.Text(request.stringify()+"\n")).output(max_output_bytes=64000000)
-    assert_eq(response.exit_code(),0)
-    guard @json.parse(response.stdout()) is {"ok":True,"result":{"tasks":Array(tasks),..},..} else { fail("long protocol") }
-    for task in tasks {
-      guard task is {"id":String(id),"reference_shell":String(script),"withheld":Array(hidden),..} else { fail("task contract") }
-      let inputs = [task]
-      inputs.append(hidden[:])
-      for index, input in inputs {
-        guard input is {"files":Object(files),"expected":expected,"expected_outputs":Object(outputs),"mutable_inputs":Array(mutable),"absent_outputs":Array(absent),..} else { fail("case contract") }
-        let work = root + "/" + suite + "/" + id + "-\{index}"
-        @fs.mkdir(work,recursive=true)
-        for path, content in files {
-          guard content is String(content) else { fail("fixture text") }
-          let parts = path.split("/").map(p=>p.to_owned()).to_array()
-          if parts.length()>1 {
-            let parent = work + "/" + parts[:parts.length()-1].join("/")
-            if !@fs.exists(parent) { @fs.mkdir(parent,recursive=true) }
-          }
-          @fs.write_file(work+"/"+path,content)
-        }
-        @shell.Cmd("cp",[worker,work+"/fixture-worker"]).run()
-        @fs.write_file(work+"/reference.sh",script)
-        let result = @shell.Cmd("sh",["reference.sh"],cwd=work).output(max_output_bytes=1000000)
-        guard result.exit_code()==0 else { fail("\{id} case \{index}: \{result.stderr()}") }
-        let actual = @json.parse(@fs.read_file(work+"/result.json").text())
-        guard actual==expected else { fail("\{id} case \{index}: expected \{expected.stringify()}, actual \{actual.stringify()}") }
-        for path, value in outputs {
-          let text = @fs.read_file(work+"/"+path).text()
-          let actual = match value { String(_) => text.to_json(); _ => @json.parse(text) }
-          guard actual == value else { fail("\{id}: incorrect additional artifact \{path}") }
-        }
-        for path in absent { guard path is String(path) else { fail("absence path") }; assert_false(@fs.exists(work+"/"+path)) }
-        for path, value in files {
-          if !mutable.contains(path.to_json()) { assert_eq(@fs.read_file(work+"/"+path).text().to_json(),value) }
-        }
-        checked += 1
+  let repo=@fs.realpath(".")
+  let bundle=@fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
+  let root=repo+"/_build/fixture-validation-v4/run-\{@env.now()}"
+  @fs.mkdir(root+"/tools",recursive=true)
+  for name in ["fixture-worker","jq","rg"] {
+    let source=if name=="fixture-worker" {bundle+"/"+name} else {
+      let found=@shell.Cmd("which",[name]).output();assert_eq(found.exit_code(),0);found.stdout().trim().to_owned()
+    }
+    @shell.Cmd("ln",["-s",source,root+"/tools/"+name]).run()
+  }
+  @shell.Cmd("chmod",["555",root+"/tools"]).run()
+  let request : Json={"schema_version":1,"op":"protocol","suite":"all"}
+  let response=@shell.Cmd(bundle+"/moonrun",[bundle+"/evaluation-model.wasm","--","--worker"],stdin=@shell.Text(request.stringify()+"\n")).output(max_output_bytes=64000000)
+  assert_eq(response.exit_code(),0)
+  guard @json.parse(response.stdout()) is {"ok":True,"result":{"tasks":Array(tasks),..},..} else {fail("protocol")}
+  let mut checked=0
+  for task in tasks {
+    guard task is {"id":String(id),"reference_shell":String(shell),"reference_mbtx":String(mbtx),"withheld":Array(withheld),"process_allow":allow,..} else {fail("task")}
+    for (arm,source) in [("shell",shell),("mbtx",mbtx)] {
+      let base=root+"/"+id+"/"+arm
+      @fs.mkdir(base,recursive=true)
+      let source_path=base+"/reference."+(if arm=="shell" {"sh"} else {"mbtx"})
+      @fs.write_file(source_path,source)
+      if arm=="mbtx" {
+        let build=@shell.Cmd("moon",["build","--frozen","--target","wasm","--release","--target-dir",base+"/build",source_path]).output(max_output_bytes=1000000)
+        @fs.write_file(base+"/compile.stderr",build.stderr())
+        assert_eq(build.exit_code(),0,msg=id+" compile: "+build.stderr())
       }
+      let cases=[task];cases.append(withheld[:])
+      for index,case in cases {
+        guard case is {"files":Object(inputs),..} else {fail("inputs")}
+        let work=base+"/case-\{index}";@fs.mkdir(work,recursive=true);put_files(work,inputs)
+        let policy : Json={"process":{"allow":allow},"net":{},"fs":{"read":[work.to_json()],"write":[work.to_json()]},"env":{}}
+        let policy_path=base+"/policy-\{index}.json";@fs.write_file(policy_path,policy.stringify())
+        let phases=match case {{"validation_phases":Array(phases),..}=>phases;_=>[case]}
+        for number,phase in phases {
+          if phase is {"input_updates":Object(updates),..} {put_files(work,updates)}
+          let args=if arm=="shell" {[source_path]} else {["--policy",policy_path,"--",base+"/build/reference.mbtx/wasm/release/build/single/single.wasm"]}
+          let run=@shell.Cmd(if arm=="shell" {"sh"} else {bundle+"/moonrun"},args,cwd=work,env={"PATH":root+"/tools:"+@env.get_env_var("PATH").unwrap_or("/usr/bin:/bin")}).output(max_output_bytes=1000000)
+          @fs.write_file(base+"/case-\{index}-phase-\{number}.stderr",run.stderr())
+          @fs.write_file(base+"/case-\{index}-phase-\{number}.stdout",run.stdout())
+          assert_eq(run.exit_code(),0,msg=id+" "+arm+" execution")
+          guard phase is {"expected":expected,"expected_outputs":Object(outputs),"absent_outputs":Array(absent),"files":Object(files),"mutable_inputs":Array(mutable),"output":String(output),..} else {fail("phase")}
+          assert_eq(@json.parse(@fs.read_file(work+"/"+output).text()),expected,msg=id+" result")
+          for name,want in outputs {
+            let text=@fs.read_file(work+"/"+name).text()
+            assert_eq(match want {String(_)=>text.to_json();_=>@json.parse(text)},want,msg=id+":"+name)
+          }
+          for name in absent {guard name is String(name) else {fail("absent path")};assert_false(@fs.exists(work+"/"+name))}
+          for name,content in files {if !mutable.contains(name.to_json()) && name!=output {assert_eq(@fs.read_file(work+"/"+name).text().to_json(),content,msg=id+":"+name)}}
+          checked+=1
+        }
+      }
+      println("[fixtures] "+id+" "+arm+" passed")
     }
   }
-  assert_eq(checked,70)
-  println("Passed \{checked} long-workflow fixture/reference checks, including unseen delivery inputs. Prescribed validation is not an autonomous research result.")
+  let summary : Json={"protocol":"programmable-shell-replacement-v4","phases_checked":checked.to_json(),"success":true,"scope":"Actual input-driven reference compilation/execution and semantic output/input checks; sandbox, worker receipts and model-request evidence are separately verified by offline replay"}
+  @fs.write_file(root+"/summary.json",summary.stringify(indent=2)+"\n")
+  println("Fixture evidence: "+root)
 }

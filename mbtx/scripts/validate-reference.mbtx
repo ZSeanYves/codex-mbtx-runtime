@@ -1,17 +1,46 @@
+///|
 import {
   "moonbitlang/async@0.21.3",
   "moonbitlang/async@0.21.3/fs",
   "moonbitlang/async@0.21.3/shell",
 }
 
+///|
 async fn main {
   let root = @fs.realpath(".")
   let work = root + "/_build/reference-validation"
-  if !@fs.exists(work) { @fs.mkdir(work, recursive=true) }
-  @shell.Cmd("moon", ["build", "--frozen", "--target", "wasm", "--release", "--target-dir", work + "/build", root + "/mbtx/reference/examples.mbtx"]).run()
-  let artifact = work + "/build/examples.mbtx/wasm/release/build/single/single.wasm"
-  let result = @shell.Cmd("moonrun", [artifact], cwd=work).output()
-  guard result.exit_code() == 0 else { fail(result.stderr()) }
-  assert_eq(result.stdout(), "reference APIs verified\n")
-  println("Frozen language and IO reference examples passed")
+  if !@fs.exists(work) {
+    @fs.mkdir(work, recursive=true)
+  }
+  let policy : Json = {
+    "process": { "allow": [
+      { "program": "jq", "args_prefix": [] },
+      { "program": "rg", "args_prefix": ["--no-config", "--json", "--"] },
+      { "program": "rg", "args_prefix": ["--no-config", "--files", "--"] },
+    ] },
+    "net": {},
+    "fs": { "read": [work.to_json()], "write": [work.to_json()] },
+    "env": {},
+  }
+  @fs.write_file(work + "/policy.json", policy.stringify())
+  for (source, name, expected) in [
+    ("mbtx/reference/examples.mbtx", "examples.mbtx", "reference APIs verified\n"),
+    ("mbtx/reference/process-examples.mbtx", "process-examples.mbtx", "direct rg and jq verified\n"),
+    ("codex-rs/ext/mbtx/src/example.mbtx", "example.mbtx", "{\"count\":2,\"label\":\"λ雪\"}\n"),
+  ] {
+    @shell.Cmd("moon", [
+      "build", "--frozen", "--target", "wasm", "--release",
+      "--target-dir", work + "/build", root + "/" + source,
+    ]).run()
+    let cwd = work + "/" + name
+    if @fs.exists(cwd) { @fs.rmdir(cwd, recursive=true) }
+    @fs.mkdir(cwd, recursive=true)
+    @fs.write_file(cwd + "/input.json", "{\"count\":2}")
+    let artifact = work + "/build/" + name + "/wasm/release/build/single/single.wasm"
+    let result = @shell.Cmd("moonrun", ["--policy", work + "/policy.json", artifact], cwd~).output()
+    guard result.exit_code() == 0 else { fail(result.stderr()) }
+    assert_eq(result.stdout(), expected)
+    println("Verified exact example source: " + source)
+  }
+  println("Frozen language, IO, injected tool and direct utility examples passed")
 }

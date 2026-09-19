@@ -1,3 +1,4 @@
+///|
 import {
   "moonbitlang/async@0.21.3",
   "moonbitlang/async@0.21.3/fs",
@@ -5,26 +6,48 @@ import {
   "moonbitlang/core/env",
 }
 
+///|
 async fn main {
-  let args=@env.args()
-  guard args.length()>=2 && ["replay","relay"].contains(args[1]) else {
-    fail("Usage: moon run mbtx/scripts/collect-study.mbtx replay|relay [mbtx-eval run options]")
+  let args = @env.args()
+  guard args.length() >= 2 && ["replay", "relay"].contains(args[1]) else {
+    fail(
+      "Usage: moon run mbtx/scripts/collect-study.mbtx replay|relay [--suite basic|complexity|all] [mbtx-eval run options]",
+    )
   }
-  let bundle=match @env.get_env_var("MBTX_BUNDLE") {
-    Some(value)=>value
-    None=>@fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
+  let bundle = match @env.get_env_var("MBTX_BUNDLE") {
+    Some(value) => value
+    None =>
+      @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
   }
-  let platform=@shell.Cmd("uname",["-s"]).output().stdout().trim().to_owned()
-  if args[1]=="relay" && platform!="Linux" {fail("The current online study protocol requires Linux")}
-  let command=["run","--bundle",bundle,"--mode",args[1]]
-  if !args.contains("--suite") {command.append(["--suite","long-study"])}
-  if !args.contains("--batch-pairs") {command.append(["--batch-pairs","10"])}
-  if !args.contains("--output") {
-    guard !args.contains("--resume") else {fail("--resume requires the original --output RUN directory")}
-    let output="_build/programmable-study/"+platform+"/"+args[1]+"/run-\{@env.now()}"
-    command.append(["--output",output])
+  let platform = @shell.Cmd("uname", ["-s"]).output().stdout().trim().to_owned()
+  if args[1] == "relay" && platform != "Linux" {
+    fail("The current online study protocol requires Linux")
+  }
+  let supplied = fn(name : String) -> Bool {
+    args.any(arg => arg == name || arg.has_prefix(name + "="))
+  }
+  let command = ["run", "--bundle", bundle, "--mode", args[1]]
+  if !supplied("--suite") {
+    command.append(["--suite", "all"])
+  }
+  if !supplied("--max-wall-seconds") {
+    command.append(["--max-wall-seconds", "7200"])
+  }
+  if !supplied("--seed") {
+    command.append(["--seed", "20260919"])
+  }
+  if !supplied("--output") {
+    guard !args.contains("--resume") else {
+      fail("--resume requires the original --output RUN directory")
+    }
+    let output = "_build/programmable-study-v4/" +
+      platform +
+      "/" +
+      args[1] +
+      "/run-\{@env.now()}"
+    command.append(["--output", output])
     println("Study output: \{output}")
   }
   command.append(args[2:])
-  @shell.Cmd(bundle+"/mbtx-eval",command).run()
+  @shell.Cmd(bundle + "/mbtx-eval", command).run()
 }

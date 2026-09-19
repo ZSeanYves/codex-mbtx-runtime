@@ -1,3 +1,4 @@
+///|
 import {
   "moonbitlang/async@0.21.3",
   "moonbitlang/async@0.21.3/fs",
@@ -7,105 +8,251 @@ import {
   "moonbitlang/core/json",
 }
 
+///|
 async fn reports(root : String) -> Array[Json] {
   let result : Array[Json] = []
-  @fs.walk(root+"/reports",max_concurrency=1,(path,files)=>{
-    if files.contains("report.json") {result.push(@json.parse(@fs.read_file(path+"/report.json").text()))}
+  @fs.walk(root + "/reports", max_concurrency=1, (path, files) => {
+    if files.contains("report.json") {
+      result.push(@json.parse(@fs.read_file(path + "/report.json").text()))
+    }
   })
-  guard !result.is_empty() else {fail("Missing report: "+root)}
+  guard !result.is_empty() else { fail("Missing report: " + root) }
   result
 }
 
+///|
 async fn main {
-  let bundle=match @env.get_env_var("MBTX_BUNDLE") {Some(value)=>value;None=>@fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()}
-  let cli=bundle+"/mbtx-eval"
-  let root="_build/long-study-validation/run-\{@env.now()}"
-  let common=["run","--bundle",bundle,"--suite","long-study","--mode","replay","--min-interval-ms","0","--repeats","1","--variants","1","--max-wall-seconds","180"]
-  @shell.Cmd(cli,common+["--output",root,"--batch-pairs","1"]).run()
-  let seals : Map[String,String] = Map([])
-  @fs.walk(root+"/attempts",max_concurrency=1,(path,files)=>{if files.contains("seal.json"){seals[path+"/seal.json"]=@fs.read_file(path+"/seal.json").text()}})
-  assert_eq(seals.length(),2)
-  @shell.Cmd(cli,common+["--output",root,"--resume"]).run()
-  for path,content in seals {assert_eq(@fs.read_file(path).text(),content)}
-  let complete=reports(root).filter(r=>r is {"partial":False,..})
-  assert_eq(complete.length(),1)
-  guard complete[0] is {"conditional":{"pairs":Number(20,..),..},"attempts":Array(attempts),..} else {fail("All twenty category/complexity pairs must pass")}
-  assert_eq(attempts.length(),40)
+  let bundle = match @env.get_env_var("MBTX_BUNDLE") {
+    Some(value) => value
+    None =>
+      @fs.read_file("_build/evaluation-bundle.txt").text().trim().to_owned()
+  }
+  let cli = bundle + "/mbtx-eval"
+  let root = "_build/offline-validation-v4/run-\{@env.now()}"
+  let common = [
+    "run", "--bundle", bundle, "--suite", "all", "--mode", "replay", "--min-interval-ms",
+    "0", "--max-wall-seconds", "7200",
+  ]
+  @shell.Cmd(cli, common + ["--output", root, "--batch-pairs", "1"]).run()
+  let seals : Map[String, String] = Map([])
+  @fs.walk(root + "/attempts", max_concurrency=1, (path, files) => {
+    if files.contains("seal.json") {
+      seals[path + "/seal.json"] = @fs.read_file(path + "/seal.json").text()
+    }
+  })
+  assert_eq(seals.length(), 2)
+  @shell.Cmd(cli, common + ["--output", root, "--resume"]).run()
+  for path, content in seals {
+    assert_eq(@fs.read_file(path).text(), content)
+  }
+  let mismatched = @shell.Cmd(cli, common + ["--output",root,"--resume","--seed","999"]).output()
+  assert_true(mismatched.exit_code()!=0)
+
+  let complete = reports(root).filter(r => r is { "partial": False, .. })
+  assert_eq(complete.length(), 1)
+  guard complete[0]
+    is {
+      "conditional": { "pairs": Number(32, ..), .. },
+      "attempts": Array(attempts),
+      ..
+    } else {
+    fail("All thirty-two v4 pairs must pass")
+  }
+  assert_eq(attempts.length(), 64)
   for a in attempts {
-    guard a is {"status":String("success"),"steps_to_success":Number(2,..),"details":{"events":Array(events),..},..} else {fail("Replay or full evidence failed: \{a.stringify()}")}
+    guard a
+      is {
+        "status": String("success"),
+        "steps_to_success": Number(2, ..),
+        "details": { "events": Array(events), .. },
+        ..
+      } else {
+      fail("Replay or full evidence failed: \{a.stringify()}")
+    }
     assert_true(!events.is_empty())
   }
-  @shell.Cmd(cli,["report",root,"--bundle",bundle,"--format","all"]).run()
-  for r in reports(root).filter(r=>r is {"partial":False,..}) {assert_eq(r,complete[0])}
+  @shell.Cmd(cli, ["report", root, "--bundle", bundle, "--format", "all"]).run()
+  for r in reports(root).filter(r => r is { "partial": False, .. }) {
+    assert_eq(r, complete[0])
+  }
   // Actual Codex performs 28 decisions and 53 tools; no old cutoff survives.
-  let extended=root+"-steps"
-  @shell.Cmd(cli,common+["--output",extended,"--tasks","repository-impact-standard-v1","--replay-prefix-turns","26"]).run()
-  guard reports(extended)[0] is {"attempts":Array(long_attempts),..} else {fail("Missing long trajectory")}
+  let extended = root + "-steps"
+  @shell.Cmd(
+    cli,
+    common +
+    [
+      "--output", extended, "--tasks", "repository-impact-basic-v4", "--replay-prefix-turns",
+      "26", "--repeats", "1",
+    ],
+  ).run()
+  guard reports(extended)[0] is { "attempts": Array(long_attempts), .. } else {
+    fail("Missing long trajectory")
+  }
   for a in long_attempts {
-    guard a is {"status":String("success"),"accounting":{"metrics":{"agent_steps":Number(28,..),"tool_calls":Number(53,..),"model_requests":Number(28,..),..},"steps":Array(steps),..},..} else {fail("Extended trajectory did not complete: \{a.stringify()}")}
-    assert_eq(steps.length(),28)
-    if a is {"arm":String("mbtx_program"),..} {
-      guard a is {"tool_outcomes":{"mbtx_cache_hits":Number(25,..),..},..} else {fail("Repeated program did not reuse its compilation")}
+    guard a
+      is {
+        "status": String("success"),
+        "accounting": {
+          "metrics": {
+            "agent_steps": Number(28, ..),
+            "tool_calls": Number(53, ..),
+            "model_requests": Number(28, ..),
+            ..
+          },
+          "steps": Array(steps),
+          ..
+        },
+        ..
+      } else {
+      fail("Extended trajectory did not complete: \{a.stringify()}")
+    }
+    assert_eq(steps.length(), 28)
+    if a is { "arm": String("mbtx_program"), .. } {
+      guard a
+        is { "tool_outcomes": { "mbtx_cache_hits": Number(25, ..), .. }, .. } else {
+        fail("Repeated program did not reuse its compilation")
+      }
     }
   }
-  let recorded=extended+"-recorded"
-  @shell.Cmd(cli,["replay",extended,"--bundle",bundle,"--output",recorded]).run()
-  guard reports(recorded)[0] is {"attempts":Array(recorded_attempts),..} else {fail("Recorded replay missing")}
-  for a in recorded_attempts {
-    guard a is {"status":String("success"),"accounting":{"metrics":{"agent_steps":Number(28,..),"tool_calls":Number(53,..),..},..},..} else {fail("Recorded trajectory changed")}
+  let recorded = extended + "-recorded"
+  @shell.Cmd(cli, ["replay", extended, "--bundle", bundle, "--output", recorded]).run()
+  guard reports(recorded)[0] is { "attempts": Array(recorded_attempts), .. } else {
+    fail("Recorded replay missing")
   }
-  for fault in ["429","500","disconnect","truncated","stall"] {
-    let destination=root+"-"+fault
-    let args=common+["--output",destination,"--tasks","repository-impact-standard-v1","--replay-fault",fault]
-    // Replace the existing wall value; never add a duplicate CLI option.
-    if fault=="stall" {for i in 0..<args.length() {if args[i]=="--max-wall-seconds" {args[i+1]="5"}}}
-    @shell.Cmd(cli,args).run()
-    guard reports(destination)[0] is {"attempts":Array(failed),..} else {fail("Fault report absent")}
-    for a in failed {
-      guard a is {"steps_to_success":Null,..} else {fail("Censored steps reported as completed")}
-      if fault=="stall" {
-        guard a is {"status":String("censored"),..} else {fail("Wall timeout attribution")}
+  for a in recorded_attempts {
+    guard a
+      is {
+        "status": String("success"),
+        "accounting": {
+          "metrics": {
+            "agent_steps": Number(28, ..),
+            "tool_calls": Number(53, ..),
+            ..
+          },
+          ..
+        },
+        ..
       } else {
-        guard a is {"status":String("relay_error"),..} else {fail("External error attributed to a backend")}
+      fail("Recorded trajectory changed")
+    }
+  }
+  for fault in ["429", "500", "disconnect", "truncated", "stall"] {
+    let destination = root + "-" + fault
+    let args = common +
+      [
+        "--output", destination, "--tasks", "repository-impact-basic-v4", "--replay-fault",
+        fault, "--repeats", "1",
+      ]
+    // Replace the existing wall value; never add a duplicate CLI option.
+    if fault == "stall" {
+      for i in 0..<args.length() {
+        if args[i] == "--max-wall-seconds" {
+          args[i + 1] = "5"
+        }
+      }
+    }
+    @shell.Cmd(cli, args).run()
+    guard reports(destination)[0] is { "attempts": Array(failed), .. } else {
+      fail("Fault report absent")
+    }
+    for a in failed {
+      guard a is { "steps_to_success": Null, .. } else {
+        fail("Censored steps reported as completed")
+      }
+      if fault == "stall" {
+        guard a is { "status": String("censored"), .. } else {
+          fail("Wall timeout attribution")
+        }
+      } else {
+        guard a is { "status": String("relay_error"), .. } else {
+          fail("External error attributed to a backend")
+        }
       }
     }
   }
   // Interrupt and kill a waiting collector, then reconstruct without credentials.
-  for (signal, suffix, expected) in [("-INT","collector-interrupt","cancelled"),("-KILL","collector-kill","censored")] {
-  let interrupted=root+"-"+suffix
-  @async.with_task_group(group=>{
-    let child=@process.spawn(group,cli,common+["--output",interrupted,"--tasks","repository-impact-standard-v1","--replay-fault","stall"])
-    let mut pid=0
-    let mut sent=false
-    for _ in 0..<1800 {
-      if @fs.exists(interrupted+"/attempts") {
-        @fs.walk(interrupted+"/attempts",max_concurrency=1,(path,files)=>{
-          if files.contains("started.json"){sent=true}
-          if files.contains("process.json") && @json.parse(@fs.read_file(path+"/process.json").text()) is {"pid":Number(value,..),..}{pid=value.to_int()}
-        })
-      }
-      if sent && pid>0 {break}
-      if child.try_wait() is Some(code){fail("Collector exited before interruption fixture: \{code}")}
-      @async.sleep(100)
-    }
-    guard sent && pid>0 else {child.cancel();fail("No recorded process for interruption")}
-    @shell.Cmd("kill",[signal,child.pid.to_string()]).run()
-    if signal=="-INT" {
-      let mut exited=false
-      for _ in 0..<600 {
-        if child.try_wait() is Some(_) {exited=true;break}
+  for
+    (signal, suffix, expected) in [
+      ("-INT", "collector-interrupt", "cancelled"),
+      ("-KILL", "collector-kill", "censored"),
+    ] {
+    let interrupted = root + "-" + suffix
+    @async.with_task_group(group => {
+      let child = @process.spawn(
+        group,
+        cli,
+        common +
+        [
+          "--output", interrupted, "--tasks", "repository-impact-basic-v4", "--replay-fault",
+          "stall", "--repeats", "1",
+        ],
+      )
+      let mut pid = 0
+      let mut sent = false
+      for _ in 0..<1800 {
+        if @fs.exists(interrupted + "/attempts") {
+          @fs.walk(interrupted + "/attempts", max_concurrency=1, (path, files) => {
+            if files.contains("started.json") {
+              sent = true
+            }
+            if files.contains("process.json") &&
+              @json.parse(@fs.read_file(path + "/process.json").text())
+              is { "pid": Number(value, ..), .. } {
+              pid = value.to_int()
+            }
+          })
+        }
+        if sent && pid > 0 {
+          break
+        }
+        if child.try_wait() is Some(code) {
+          fail("Collector exited before interruption fixture: \{code}")
+        }
         @async.sleep(100)
       }
-      guard exited else {child.cancel();fail("Collector did not finish cancellation")}
+      guard sent && pid > 0 else {
+        child.cancel()
+        fail("No recorded process for interruption")
+      }
+      @shell.Cmd("kill", [signal, child.pid.to_string()]).run()
+      if signal == "-INT" {
+        let mut exited = false
+        for _ in 0..<600 {
+          if child.try_wait() is Some(_) {
+            exited = true
+            break
+          }
+          @async.sleep(100)
+        }
+        guard exited else {
+          child.cancel()
+          fail("Collector did not finish cancellation")
+        }
+      }
+      let _ = child.wait()
+      if signal == "-KILL" {
+        let _ = @shell.Cmd("kill", ["-KILL", pid.to_string()]).output()
+      }
+    })
+    @shell.Cmd(cli, [
+      "report", interrupted, "--bundle", bundle, "--format", "all",
+    ]).run()
+    for report in reports(interrupted) {
+      guard report
+        is {
+          "partial": True,
+          "attempts": [
+            { "status": String(actual), "steps_to_success": Null, .. },
+          ],
+          ..
+        } &&
+        actual == expected else {
+        fail("Interrupted evidence lost")
+      }
     }
-    let _=child.wait()
-    if signal=="-KILL" {let _=@shell.Cmd("kill",["-KILL",pid.to_string()]).output()}
-  })
-  @shell.Cmd(cli,["report",interrupted,"--bundle",bundle,"--format","all"]).run()
-  for report in reports(interrupted) {
-    guard report is {"partial":True,"attempts":[{"status":String(actual),"steps_to_success":Null,..}],..} && actual==expected else {fail("Interrupted evidence lost")}
   }
-  }
-  println("Offline validation passed: 20 paired long workflows, independent delivery inputs, immutable resume, deterministic report reconstruction, 28 decisions / 53 tools, cache reuse, external faults and collector interruption.")
-  println("Evidence: "+root)
+  println(
+    "Offline validation passed: 32 paired v4 tasks, independent delivery inputs, immutable resume, deterministic report reconstruction, 28 decisions / 53 tools, cache reuse, external faults and collector interruption.",
+  )
+  println("Evidence: " + root)
 }

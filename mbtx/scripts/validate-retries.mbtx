@@ -26,7 +26,7 @@ async fn main {
     let config = root + "/" + name + ".toml"
     @fs.write_file(config, base.replace(old="request_max_retries = 2", new="request_max_retries = \{http}").replace(old="stream_max_retries = 2", new="stream_max_retries = \{stream}"))
     let destination = root + "/" + name
-    @shell.Cmd(bundle + "/mbtx-eval", ["run","--bundle",bundle,"--mode","replay","--suite","long-study","--tasks","repository-impact-standard-v1","--repeats","1","--min-interval-ms","0","--max-wall-seconds","60","--config",config,"--output",destination,"--replay-fault",fault]).run()
+    @shell.Cmd(bundle + "/mbtx-eval", ["run","--bundle",bundle,"--mode","replay","--suite","basic","--tasks","repository-impact-basic-v4","--repeats","1","--min-interval-ms","0","--max-wall-seconds","60","--config",config,"--output",destination,"--replay-fault",fault]).run()
     let reports = @fs.readdir(destination + "/reports")
     assert_eq(reports.length(),1)
     let report = @json.parse(@fs.read_file(destination + "/reports/" + reports[0] + "/report.json").text())
