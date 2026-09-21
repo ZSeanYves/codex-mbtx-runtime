@@ -131,6 +131,18 @@ async fn main() -> Result<()> {
                 .collect();
             tasks.sort();
             tasks.dedup();
+            if let Some(selection) = manifest.get("schedule_selection") {
+                tasks = serde_json::from_value(selection["task_ids"].clone())
+                    .context("recorded task selection")?;
+            }
+            let start_pair = match manifest.get("schedule_selection") {
+                Some(selection) => usize::try_from(
+                    selection["start_pair"]
+                        .as_u64()
+                        .context("recorded start pair")?,
+                )?,
+                None => 0,
+            };
             let config_path =
                 output.with_extension(format!("config-{}.toml", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(config_path.parent().context("output parent")?)?;
@@ -156,6 +168,7 @@ async fn main() -> Result<()> {
                 credentials_file: None,
                 repeats: Some(repeats),
                 batch_pairs: None,
+                start_pair,
                 max_wall_seconds: manifest["max_wall_seconds"]
                     .as_u64()
                     .context("recorded wall limit")?,

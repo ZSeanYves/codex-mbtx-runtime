@@ -99,7 +99,8 @@ impl Gate {
                 // Codex owns the two observable retry counters. A hidden
                 // reqwest resend here would evade both the gate and evidence.
                 .retry(reqwest::retry::never())
-                .timeout(Duration::from_secs(600))
+                // The owning attempt closes the route at its total deadline.
+                // An active response stream must not have a shorter HTTP cap.
                 .build()?,
             server: Mutex::new(None),
         });
@@ -143,6 +144,16 @@ pub(crate) fn retry_delay(value: Option<&str>, now: SystemTime) -> Duration {
             })
         })
         .unwrap_or(Duration::from_secs(30))
+}
+
+fn transport_error_details(error: &reqwest::Error) -> serde_json::Value {
+    // Do not persist Display/Debug or the source chain: they can include the
+    // upstream URL or credentials. These flags describe transport, not blame.
+    json!({
+        "is_timeout": error.is_timeout(),
+        "is_connect": error.is_connect(),
+        "is_body": error.is_body(),
+    })
 }
 
 async fn handle(
@@ -346,10 +357,10 @@ async fn exchange(
                 .map(str::to_owned),
             Some(response),
         ),
-        Some(Err(_)) => {
+        Some(Err(error)) => {
             json_new(
                 &directory.join("result.json"),
-                &json!({"status_code":null,"transport_error":true,"send_ns":send_ns,"end_ns":gate.epoch.elapsed().as_nanos() as u64,"complete":false}),
+                &json!({"status_code":null,"transport_error":true,"transport_error_details":transport_error_details(&error),"phase":"awaiting_headers","send_ns":send_ns,"end_ns":gate.epoch.elapsed().as_nanos() as u64,"complete":false}),
             )?;
             return Ok(Response::builder()
                 .status(502)
@@ -392,11 +403,13 @@ async fn exchange(
     let mut stream = match (response, reply) {
         (Some(response), _) => response
             .bytes_stream()
-            .map(|value| value.map_err(std::io::Error::other))
+            .map(|value| value.map_err(|error| Some(transport_error_details(&error))))
             .boxed(),
         (None, Some(fixed)) => {
             let end = if fixed.disconnect {
-                vec![Err(std::io::Error::other("controlled offline disconnect"))]
+                // Offline injection is not a reqwest failure; do not invent
+                // typed transport evidence for it.
+                vec![Err(None)]
             } else {
                 vec![]
             };
@@ -414,6 +427,7 @@ async fn exchange(
         let mut size = 0u64;
         let mut disconnected = false;
         let mut transport_error = false;
+        let mut transport_details = None;
         let mut evidence_error = false;
         let mut cancelled = false;
         let mut first_byte = None;
@@ -441,8 +455,9 @@ async fn exchange(
                         }
                     }
                 }
-                Err(_) => {
+                Err(details) => {
                     transport_error = true;
+                    transport_details = details;
                     break;
                 }
             }
@@ -455,7 +470,7 @@ async fn exchange(
         if evidence_error {
             route.observation_failures.fetch_add(1, Ordering::SeqCst);
         }
-        let result = json!({"status_code":status,"transport_error":transport_error,"evidence_error":evidence_error,"complete":!transport_error && !evidence_error && !cancelled,"cancelled":cancelled,"client_disconnected":disconnected,"first_byte_ns":first_byte,"end_ns":stream_ended_ns,"evidence_sync_ns":evidence_sync_ns,"response_bytes":size});
+        let result = json!({"status_code":status,"transport_error":transport_error,"transport_error_details":transport_details,"phase":"response_body","evidence_error":evidence_error,"complete":!transport_error && !evidence_error && !cancelled,"cancelled":cancelled,"client_disconnected":disconnected,"first_byte_ns":first_byte,"end_ns":stream_ended_ns,"evidence_sync_ns":evidence_sync_ns,"response_bytes":size});
         if json_new(&directory.join("result.json"), &result).is_err() {
             route.observation_failures.fetch_add(1, Ordering::SeqCst);
         }

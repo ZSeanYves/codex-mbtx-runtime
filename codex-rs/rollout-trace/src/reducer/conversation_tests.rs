@@ -387,6 +387,42 @@ fn request_reuses_prior_tool_outputs_with_internal_metadata() -> anyhow::Result<
 }
 
 #[test]
+fn json_tool_output_summaries_preserve_utf8_boundaries_and_payloads() -> anyhow::Result<()> {
+    for character in ['é', '雪', '🦀'] {
+        for partial_bytes in 1..character.len_utf8() {
+            let temp = TempDir::new()?;
+            let writer = create_started_writer(&temp)?;
+            start_turn(&writer, "turn-1")?;
+            let prefix = "x".repeat(240 - "{\"text\":\"".len() - partial_bytes);
+            let output = json!({"text": format!("{prefix}{character}tail")});
+            let request = writer.write_json_payload(
+                RawPayloadKind::InferenceRequest,
+                &json!({"input": [{
+                    "type": "function_call_output",
+                    "call_id": "call-unicode",
+                    "output": output,
+                }]}),
+            )?;
+            let raw_payload_id = request.raw_payload_id.clone();
+            append_inference_start(&writer, "inference-1", "turn-1", request)?;
+
+            let rollout = replay_bundle(temp.path())?;
+            let item_id = &rollout.inference_calls["inference-1"].request_item_ids[0];
+            assert_eq!(
+                rollout.conversation_items[item_id].body,
+                ConversationBody {
+                    parts: vec![ConversationPart::Json {
+                        summary: format!("{{\"text\":\"{prefix}..."),
+                        raw_payload_id,
+                    }],
+                }
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn tool_output_call_id_reuse_with_different_nested_metadata_is_reducer_error() -> anyhow::Result<()>
 {
     let temp = TempDir::new()?;

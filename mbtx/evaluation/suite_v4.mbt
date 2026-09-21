@@ -155,6 +155,13 @@ fn v4_task(
   object["process_allow"] = allow.to_json()
   object["strict_worker_receipts"] = true.to_json()
   object["operation_receipts"] = true.to_json()
+  let repeated_delivery = delivery &&
+    field(case, "validation_phases") is Array(phases) &&
+    phases.length() > 1 &&
+    field(field(phases[1], "expected"), "executed") == Json::array([])
+  if repeated_delivery {
+    object["visible_result_policy"] = "cumulative_receipts_invocation_subset_v1"
+  }
   object["goal"] = (v4_text(case, "goal") +
   " Write result.json with schema: " +
   v4_text(case, "output_schema") +
@@ -165,6 +172,11 @@ fn v4_task(
     "Save the single source named by your arm instructions, running without arguments from cwd. Fresh visible and two withheld inputs are validated without model assistance. Where a no-change pass is specified, result.executed describes that invocation only; the evaluator separately archives earlier results and receipts."
   } else {
     "No reusable source submission is required."
+  }) +
+  (if repeated_delivery {
+    " The original workspace is checked against cumulative real worker receipts and final artifacts. Its final result.executed must be a sorted unique subset of IDs requiring work from the original inputs, since earlier invocations may already have completed some work. Saved source is independently run on fresh inputs, where executed is checked exactly for each invocation, including unchanged repeats."
+  } else {
+    ""
   })).to_json()
   Json::object(object)
 }
@@ -209,6 +221,10 @@ fn v4_basic(index : Int, variant : Int) -> Json {
   if index == 3 {
     object["goal"] = (case.instance.goal +
     " Explicitly set config.schema_version to integer 2, including migrated.json. Preserve every unrelated field.").to_json()
+  }
+  if index == 7 {
+    object["goal"] = (v4_text(Json::object(object), "goal") +
+    " Obtain successful worker hash receipts for each selected candidate and final target using the exact workspace-relative path from release-plan.json, without a leading ./ or an absolute prefix. Additional hashes of rejected candidates and other files are allowed.").to_json()
   }
   let result = Json::object(object)
   if index == 9 {

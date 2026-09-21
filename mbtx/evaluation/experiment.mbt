@@ -37,7 +37,7 @@ pub fn analyze_attempt(task : Json, facts : Json) -> Json raise {
       "confidence": "unknown",
     }
   } else {
-    task_oracle(task, field(facts, "snapshot"))
+    visible_task_oracle(task, field(facts, "snapshot"))
   }
   let validation = field(facts, "submission")
   let oracle : Json = if field(task, "acceptance") == Json::string("programs") {

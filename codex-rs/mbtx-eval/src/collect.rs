@@ -48,6 +48,10 @@ pub(crate) struct RunArgs {
     /// Stop between pairs after this many newly attempted pairs in this invocation.
     #[arg(long)]
     pub batch_pairs: Option<usize>,
+    /// Start a new run at this zero-based pair index, preserving original IDs and arm order.
+    /// Earlier results remain in their original run; this does not import or overwrite them.
+    #[arg(long, default_value_t = 0)]
+    pub start_pair: usize,
     /// Entire Codex attempt, including external requests and pacing; never a step cutoff.
     #[arg(long, default_value_t = 7200)]
     pub max_wall_seconds: u64,
@@ -223,7 +227,16 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         tasks.retain(|t| args.scenarios.iter().any(|id| t["scenario"] == *id));
     }
     ensure!(!tasks.is_empty(), "task selection is empty");
-    let expected_schedule = schedule(&tasks, repeats, args.seed);
+    let mut expected_schedule = schedule(&tasks, repeats, args.seed);
+    ensure!(
+        args.start_pair < expected_schedule.len(),
+        "start-pair must identify a pair in the complete selected schedule"
+    );
+    let schedule_selection = json!({
+        "start_pair": args.start_pair,
+        "task_ids": tasks.iter().map(|task| &task["id"]).collect::<Vec<_>>()
+    });
+    let expected_schedule = expected_schedule.split_off(args.start_pair);
     let manifest = if args.resume {
         let previous = read_json(&args.output.join("run.json"))?;
         ensure!(
@@ -241,6 +254,9 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                 && previous["observation"].as_str().unwrap_or("full") == args.observation
                 && previous["retry_policy"] == retry_policy
                 && previous["schedule"] == json!(expected_schedule)
+                && previous
+                    .get("schedule_selection")
+                    .is_none_or(|selection| selection == &schedule_selection)
                 && previous["protocol"] == protocol
                 && previous["path"] == path
                 && previous["utilities"] == json!(utilities)
@@ -275,6 +291,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         let fixture_seals = crate::evidence::hashes(&args.output.join("fixtures"))?;
         let manifest = json!({"schema_version":1,"run_id":uuid::Uuid::new_v4().to_string(),"created_ms":now_ms(),"mode":args.mode,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,"bundle":bundle_info,"protocol":protocol,"schedule":expected_schedule,"config":config,"min_interval_ms":args.min_interval_ms,"seed":args.seed,"path":std::env::var("PATH").unwrap_or_default(),"replay_source":args.replay_source,"replay_fault":args.replay_fault,"fixture_hashes":fixture_seals});
         let mut manifest = manifest;
+        manifest["schedule_selection"] = schedule_selection;
         manifest["path"] = json!(path);
         manifest["utilities"] = json!(utilities);
         manifest["max_wall_seconds"] = json!(args.max_wall_seconds);

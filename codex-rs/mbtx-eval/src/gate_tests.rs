@@ -3,6 +3,191 @@ use axum::routing::post;
 use pretty_assertions::assert_eq;
 use std::sync::atomic::AtomicUsize;
 
+#[tokio::test]
+async fn active_stream_continues_to_upstream_completion() -> Result<()> {
+    streamed_response(StreamEnd::Complete).await
+}
+
+#[tokio::test]
+async fn route_cancellation_preserves_received_body_without_transport_failure() -> Result<()> {
+    streamed_response(StreamEnd::Cancel).await
+}
+
+#[tokio::test]
+async fn body_transport_failure_retains_typed_flags_without_private_details() -> Result<()> {
+    streamed_response(StreamEnd::TransportFailure).await
+}
+
+enum StreamEnd {
+    Complete,
+    Cancel,
+    TransportFailure,
+}
+
+async fn streamed_response(end: StreamEnd) -> Result<()> {
+    let (sender, receiver) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(1);
+    let receiver = Arc::new(Mutex::new(Some(receiver)));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let upstream =
+        Router::new().route(
+            "/private-upstream-address/responses",
+            post(move || {
+                let receiver = Arc::clone(&receiver);
+                async move {
+                    Body::from_stream(ReceiverStream::new(receiver.lock().await.take().unwrap()))
+                }
+            }),
+        );
+    let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+    let gate = Gate::start(
+        format!("http://{address}/private-upstream-address"),
+        "private-key-never-persist".into(),
+        Duration::ZERO,
+    )
+    .await?;
+    let temp = tempfile::tempdir()?;
+    std::fs::create_dir(temp.path().join("http"))?;
+    let route = gate
+        .add(
+            "stream".into(),
+            Route {
+                directory: temp.path().to_owned(),
+                arm: "probe".into(),
+                token: "local".into(),
+                replies: None,
+                active: AtomicBool::new(true),
+                requests: AtomicUsize::new(0),
+                otel_requests: AtomicUsize::new(0),
+                observation_failures: AtomicUsize::new(0),
+                closed: Notify::new(),
+                otel_write: std::sync::Mutex::new(()),
+            },
+        )
+        .await;
+    sender.send(Ok(Bytes::from_static(b"first\n"))).await?;
+    let mut response = reqwest::Client::builder()
+        .no_proxy()
+        .build()?
+        .post(format!("{}/a/stream/v1/responses", gate.endpoint))
+        .bearer_auth("local")
+        .json(&json!({"input":[]}))
+        .send()
+        .await?;
+    assert_eq!(
+        response.chunk().await?,
+        Some(Bytes::from_static(b"first\n"))
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), gate.drain())
+            .await
+            .is_err(),
+        "the active stream must retain its slot while awaiting another chunk"
+    );
+    sender.send(Ok(Bytes::from_static(b"second\n"))).await?;
+    assert_eq!(
+        response.chunk().await?,
+        Some(Bytes::from_static(b"second\n"))
+    );
+    let expected = match end {
+        StreamEnd::Complete => {
+            drop(sender);
+            (true, false, false, serde_json::Value::Null)
+        }
+        StreamEnd::Cancel => {
+            route.close();
+            (false, true, false, serde_json::Value::Null)
+        }
+        StreamEnd::TransportFailure => {
+            sender
+                .send(Err(std::io::Error::other("private-upstream-error")))
+                .await?;
+            // reqwest bytes_stream wraps a response-body failure as a decode
+            // error. Preserve its actual flags rather than inferring is_body.
+            (
+                false,
+                false,
+                true,
+                json!({"is_timeout":false,"is_connect":false,"is_body":false}),
+            )
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), gate.drain()).await?;
+    let result = crate::evidence::read_json(&temp.path().join("http/request-0000/result.json"))?;
+    assert_eq!(
+        (
+            result["complete"].as_bool().unwrap(),
+            result["cancelled"].as_bool().unwrap(),
+            result["transport_error"].as_bool().unwrap(),
+            result["transport_error_details"].clone(),
+        ),
+        expected
+    );
+    assert_eq!(
+        std::fs::read(temp.path().join("http/request-0000/response.body"))?,
+        b"first\nsecond\n"
+    );
+    assert_eq!(route.observation_failures.load(Ordering::SeqCst), 0);
+    for entry in walkdir::WalkDir::new(temp.path()) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            assert!(!String::from_utf8_lossy(&std::fs::read(entry.path())?).contains("private-"));
+        }
+    }
+    gate.stop().await;
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_transport_failure_retains_typed_flags_without_upstream_url() -> Result<()> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let gate = Gate::start(
+        format!("http://{address}/private-upstream-address"),
+        "private-key-never-persist".into(),
+        Duration::ZERO,
+    )
+    .await?;
+    drop(listener);
+    let temp = tempfile::tempdir()?;
+    std::fs::create_dir(temp.path().join("http"))?;
+    gate.add(
+        "refused".into(),
+        Route {
+            directory: temp.path().to_owned(),
+            arm: "probe".into(),
+            token: "local".into(),
+            replies: None,
+            active: AtomicBool::new(true),
+            requests: AtomicUsize::new(0),
+            otel_requests: AtomicUsize::new(0),
+            observation_failures: AtomicUsize::new(0),
+            closed: Notify::new(),
+            otel_write: std::sync::Mutex::new(()),
+        },
+    )
+    .await;
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .build()?
+        .post(format!("{}/a/refused/v1/responses", gate.endpoint))
+        .bearer_auth("local")
+        .json(&json!({"input":[]}))
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let result = crate::evidence::read_json(&temp.path().join("http/request-0000/result.json"))?;
+    assert_eq!(
+        result["transport_error_details"],
+        json!({"is_timeout":false,"is_connect":true,"is_body":false})
+    );
+    assert!(!result.to_string().contains("private-"));
+    assert_eq!(response.text().await?, "upstream transport failed");
+    gate.stop().await;
+    Ok(())
+}
+
 #[test]
 fn cooldown_uses_seconds_dates_and_invalid_fallback() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);

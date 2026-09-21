@@ -75,6 +75,35 @@ async fn main {
   for r in reports(root).filter(r => r is { "partial": False, .. }) {
     assert_eq(r, complete[0])
   }
+  // Continue in a fresh run without renumbering pairs or resetting repetition.
+  // Recorded replay must retain the original task selection, even when the
+  // suffix itself contains only one of those tasks.
+  let suffix = root + "-schedule-suffix"
+  @shell.Cmd(cli, common + ["--output", suffix, "--start-pair", "31"]).run()
+  guard @json.parse(@fs.read_file(root + "/run.json").text())
+    is { "schedule": Array(full_schedule), .. } else { fail("full schedule") }
+  for destination in [suffix, suffix + "-recorded"] {
+    if destination != suffix {
+      @shell.Cmd(cli, ["replay", suffix, "--bundle", bundle, "--output", destination]).run()
+    }
+    guard @json.parse(@fs.read_file(destination + "/run.json").text())
+      is { "schedule": Array(selected), .. } else { fail("suffix schedule") }
+    assert_eq(selected, full_schedule[31:].to_owned())
+    guard reports(destination)[0]
+      is { "partial": False, "attempts": Array(attempts), .. } else {
+      fail("schedule suffix incomplete")
+    }
+    assert_eq(attempts.length(), 2)
+    for attempt in attempts {
+      guard attempt is { "status": String("success"), .. } else {
+        fail("schedule suffix failed")
+      }
+    }
+  }
+  let changed_start = @shell.Cmd(cli, common + ["--output", suffix, "--resume", "--start-pair", "30"]).output()
+  assert_true(changed_start.exit_code() != 0)
+  let empty_schedule = @shell.Cmd(cli, common + ["--output", suffix + "-invalid", "--start-pair", "32"]).output()
+  assert_true(empty_schedule.exit_code() != 0)
   // Actual Codex performs 28 decisions and 53 tools; no old cutoff survives.
   let extended = root + "-steps"
   @shell.Cmd(
