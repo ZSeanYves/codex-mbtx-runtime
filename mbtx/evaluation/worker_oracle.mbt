@@ -1,4 +1,12 @@
 ///|
+/// A receipt is trusted only when the evaluator observed it inside the
+/// attempt workspace. Older records without scope metadata remain compatible.
+fn trusted_worker_record(record : Json) -> Bool {
+  field(record, "confidence") == Json::string("observed") &&
+  field(field(record, "scope"), "within_root") != false.to_json()
+}
+
+///|
 /// Require paired start/completion receipts. Exact execution counts apply
 /// only where the task declares them; read-only diagnostics may be repeated.
 /// A missing native receipt is never reconstructed from source text.
@@ -7,9 +15,7 @@ fn worker_receipt_oracle(
   records : Array[Json],
   required : Array[Json],
 ) -> Json {
-  let observed = records.filter(r => {
-    field(r, "confidence") == Json::string("observed")
-  })
+  let observed = records.filter(trusted_worker_record)
   let operations = worker_operation_records(task, observed)
   let completed = operations.filter(r => {
     field(field(r, "event"), "phase") == Json::string("completed")
@@ -120,6 +126,7 @@ fn worker_receipt_oracle(
 /// Preserve diagnostic processes in raw evidence, but enforce execution policy
 /// only on worker actions that crossed the native operation boundary.
 fn worker_operation_records(task : Json, records : Array[Json]) -> Array[Json] {
+  let records = records.filter(trusted_worker_record)
   if field(task, "operation_receipts") != true.to_json() {
     return records
   }

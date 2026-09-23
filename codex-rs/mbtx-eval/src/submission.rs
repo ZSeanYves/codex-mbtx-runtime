@@ -307,6 +307,7 @@ impl Validator<'_> {
             let receipts = crate::worker_receipts::WorkerReceipts::start(
                 &case_evidence,
                 &self.bundle.join("fixture-worker"),
+                &workspace,
             )
             .await?;
             json_new(

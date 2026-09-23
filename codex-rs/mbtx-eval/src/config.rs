@@ -192,9 +192,9 @@ pub(crate) fn child_config(
         toml::Value::try_from(BTreeMap::from([
             ("shell_tool", !mbtx),
             ("unified_exec", !mbtx),
-            ("code_mode", false),
+            ("code_mode", true),
             ("code_mode_only", false),
-            ("code_mode_host", false),
+            ("code_mode_host", true),
             ("multi_agent_v2", false),
             ("plugins", false),
             ("apps", false),

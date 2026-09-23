@@ -15,7 +15,8 @@ use std::os::unix::net::UnixListener;
 use std::os::unix::process::CommandExt;
 
 #[test]
-fn passive_unix_socket_grant_preserves_restricted_ip_network() -> Result<(), Box<dyn std::error::Error>> {
+fn passive_unix_socket_grant_preserves_restricted_ip_network()
+-> Result<(), Box<dyn std::error::Error>> {
     let temporary = tempfile::tempdir()?;
     let cwd = AbsolutePathBuf::from_absolute_path(temporary.path().canonicalize()?)?;
     let socket = cwd.join("observer.sock");
@@ -49,7 +50,12 @@ print(sys.argv[2])
         let request = SandboxManager::new().transform(SandboxTransformRequest {
             command: SandboxCommand {
                 program: "python3".into(),
-                args: vec!["-c".into(), script.into(), socket.to_string_lossy().into_owned(), grant.into()],
+                args: vec![
+                    "-c".into(),
+                    script.into(),
+                    socket.to_string_lossy().into_owned(),
+                    grant.into(),
+                ],
                 cwd: cwd.clone().into(),
                 env: Default::default(),
                 managed_network: context,
@@ -68,10 +74,17 @@ print(sys.argv[2])
         })?;
         assert!(!request.command.iter().any(|arg| arg == "--managed-network"));
         let mut command = std::process::Command::new(&request.command[0]);
-        command.args(&request.command[1..]).current_dir(cwd.as_path());
-        if let Some(arg0) = request.arg0 { command.arg0(arg0); }
+        command
+            .args(&request.command[1..])
+            .current_dir(cwd.as_path());
+        if let Some(arg0) = request.arg0 {
+            command.arg0(arg0);
+        }
         let output = command.output()?;
-        assert_eq!((output.status.code(), output.stdout, output.stderr), (Some(0), format!("{grant}\n").into_bytes(), vec![]));
+        assert_eq!(
+            (output.status.code(), output.stdout, output.stderr),
+            (Some(0), format!("{grant}\n").into_bytes(), vec![])
+        );
     }
     let (mut peer, _) = listener.accept()?;
     let mut received = Vec::new();

@@ -1,6 +1,5 @@
 //! Attempt-scoped receipts from the real, hash-verified fixture executable.
 //! The socket has no oracle API and cannot launch processes or read task files.
-#[cfg(target_os = "linux")]
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::ensure;
@@ -15,10 +14,24 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::net::UnixStream;
+
+fn is_peer_close(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::NotConnected
+    )
+}
+
+async fn write_ack<W: AsyncWrite + Unpin>(writer: &mut W) -> std::io::Result<()> {
+    writer.write_all(b"recorded\n").await
+}
 
 pub(crate) struct WorkerReceipts {
     pub socket: PathBuf,
@@ -66,7 +79,7 @@ fn peer_executable(stream: &UnixStream) -> Result<(i32, PathBuf)> {
 }
 
 impl WorkerReceipts {
-    pub async fn start(evidence: &Path, executable: &Path) -> Result<Self> {
+    pub async fn start(evidence: &Path, executable: &Path, scope: &Path) -> Result<Self> {
         // Unix socket paths have a small OS limit; never put them under a long run path.
         let parent = Path::new("/tmp").join(format!("mw-{}", uuid::Uuid::new_v4().simple()));
         let mut builder = fs::DirBuilder::new();
@@ -76,6 +89,7 @@ impl WorkerReceipts {
         let socket = parent.join("s");
         let listener = UnixListener::bind(&socket)?;
         let hash = crate::evidence::digest(&fs::read(executable)?);
+        let scope = scope.canonicalize()?;
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -96,10 +110,20 @@ impl WorkerReceipts {
                     tokio::time::timeout(std::time::Duration::from_secs(5), reader.read_line(&mut text)).await??;
                     ensure!(text.len() <= 65536, "worker event exceeds bound");
                     let event: Value = serde_json::from_str(&text)?;
-                    let record = json!({"sequence":sequence,"pid":pid,"received_ns":received_ns,"clock_domain":clock_domain,"executable_sha256":hash,"event":event,"confidence":"observed"});
+                    let cwd = event["cwd"].as_str().context("worker cwd missing")?;
+                    let canonical_cwd = Path::new(cwd).canonicalize().ok();
+                    let within_root = canonical_cwd
+                        .as_ref()
+                        .is_some_and(|canonical_cwd| canonical_cwd.starts_with(&scope));
+                    let confidence = if within_root { "observed" } else { "untrusted" };
+                    let record = json!({"sequence":sequence,"pid":pid,"received_ns":received_ns,"clock_domain":clock_domain,"executable_sha256":hash,"event":event,"scope":{"cwd":cwd,"canonical_cwd":canonical_cwd,"root":scope,"within_root":within_root},"confidence":confidence});
                     serde_json::to_writer(&mut file, &record)?;
                     file.write_all(b"\n")?;
-                    reader.get_mut().get_mut().write_all(b"recorded\n").await?;
+                    match write_ack(reader.get_mut().get_mut()).await {
+                        Ok(()) => {}
+                        Err(error) if is_peer_close(&error) => {}
+                        Err(error) => return Err(error.into()),
+                    }
                     Ok((pid, record))
                 }.await;
                 if let Err(error) = result {
@@ -127,3 +151,7 @@ impl WorkerReceipts {
         result
     }
 }
+
+#[cfg(test)]
+#[path = "worker_receipts_tests.rs"]
+mod tests;

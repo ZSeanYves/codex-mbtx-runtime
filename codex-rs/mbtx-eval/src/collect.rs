@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -63,6 +64,10 @@ pub(crate) struct RunArgs {
     pub tasks: Vec<String>,
     #[arg(long, value_delimiter = ',')]
     pub scenarios: Vec<String>,
+    /// Run only these exact frozen schedule slots (`pair-0000/arm`).
+    /// Pair IDs remain those from the complete schedule; unselected arms are skipped.
+    #[arg(long, value_delimiter = ',')]
+    pub slots: Vec<String>,
     #[arg(long)]
     pub resume: bool,
     #[arg(long)]
@@ -94,6 +99,65 @@ fn route(directory: PathBuf, arm: &str, replies: Option<Vec<replay::Reply>>) -> 
         closed: tokio::sync::Notify::new(),
         otel_write: std::sync::Mutex::new(()),
     })
+}
+
+fn validate_slots(raw: &[String], schedule: &[Value]) -> Result<Vec<String>> {
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut seen = BTreeSet::new();
+    let mut slots = Vec::with_capacity(raw.len());
+    for slot in raw {
+        let (pair_id, arm) = slot
+            .split_once('/')
+            .with_context(|| format!("slot must be pair_id/arm: {slot}"))?;
+        ensure!(
+            !pair_id.is_empty() && !arm.is_empty() && !arm.contains('/'),
+            "slot must be pair_id/arm: {slot}"
+        );
+        let pair = schedule
+            .iter()
+            .find(|pair| pair["pair_id"].as_str() == Some(pair_id))
+            .with_context(|| format!("unknown pair in slot {slot}"))?;
+        ensure!(
+            pair["arms"]
+                .as_array()
+                .is_some_and(|arms| arms.iter().any(|value| value.as_str() == Some(arm))),
+            "unknown arm in slot {slot}"
+        );
+        ensure!(seen.insert(slot), "duplicate slot {slot}");
+        slots.push(slot.clone());
+    }
+    Ok(slots)
+}
+
+fn slot_selected(manifest: &Value, pair_id: &Value, arm: &Value) -> bool {
+    let Some(slots) = manifest["schedule_selection"]["slots"].as_array() else {
+        return true;
+    };
+    let Some(pair_id) = pair_id.as_str() else {
+        return false;
+    };
+    let Some(arm) = arm.as_str() else {
+        return false;
+    };
+    let slot = format!("{pair_id}/{arm}");
+    slots
+        .iter()
+        .any(|value| value.as_str() == Some(slot.as_str()))
+}
+
+fn selected_arm_count(manifest: &Value, pairs: &[Value]) -> usize {
+    pairs
+        .iter()
+        .flat_map(|pair| {
+            pair["arms"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(move |arm| slot_selected(manifest, &pair["pair_id"], arm))
+        })
+        .count()
 }
 
 pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
@@ -228,15 +292,30 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
     }
     ensure!(!tasks.is_empty(), "task selection is empty");
     let mut expected_schedule = schedule(&tasks, repeats, args.seed);
+    let slots = validate_slots(&args.slots, &expected_schedule)?;
+    ensure!(
+        slots.is_empty() || args.start_pair == 0,
+        "--slots cannot be combined with a nonzero --start-pair"
+    );
     ensure!(
         args.start_pair < expected_schedule.len(),
         "start-pair must identify a pair in the complete selected schedule"
     );
-    let schedule_selection = json!({
-        "start_pair": args.start_pair,
-        "task_ids": tasks.iter().map(|task| &task["id"]).collect::<Vec<_>>()
-    });
-    let expected_schedule = expected_schedule.split_off(args.start_pair);
+    let schedule_selection = if slots.is_empty() {
+        json!({
+            "start_pair": args.start_pair,
+            "task_ids": tasks.iter().map(|task| &task["id"]).collect::<Vec<_>>()
+        })
+    } else {
+        json!({
+            "start_pair": 0,
+            "task_ids": tasks.iter().map(|task| &task["id"]).collect::<Vec<_>>(),
+            "slots": slots
+        })
+    };
+    if args.slots.is_empty() {
+        expected_schedule = expected_schedule.split_off(args.start_pair);
+    }
     let manifest = if args.resume {
         let previous = read_json(&args.output.join("run.json"))?;
         ensure!(
@@ -378,12 +457,14 @@ async fn collect_schedule(
     }
     let mut completed = report::assess(root, analysis).await?;
     let pairs = manifest["schedule"].as_array().context("schedule")?;
+    let planned_arms = selected_arm_count(manifest, pairs);
     let mut started_pairs = 0;
     for pair in pairs {
         let pending = pair["arms"].as_array().context("arms")?.iter().any(|arm| {
-            !completed
-                .iter()
-                .any(|a| a["pair_id"] == pair["pair_id"] && a["arm"] == *arm)
+            slot_selected(manifest, &pair["pair_id"], arm)
+                && !completed
+                    .iter()
+                    .any(|a| a["pair_id"] == pair["pair_id"] && a["arm"] == *arm)
         });
         if !pending {
             continue;
@@ -399,6 +480,9 @@ async fn collect_schedule(
             .find(|t| t["id"] == pair["task_id"])
             .context("scheduled task")?;
         for arm in pair["arms"].as_array().context("arms")? {
+            if !slot_selected(manifest, &pair["pair_id"], arm) {
+                continue;
+            }
             if completed
                 .iter()
                 .any(|a| a["pair_id"] == pair["pair_id"] && a["arm"] == *arm)
@@ -423,7 +507,7 @@ async fn collect_schedule(
             eprintln!(
                 "[eval] {}/{} arms; {} {arm} {}; repeat {}",
                 completed.len(),
-                pairs.len() * 2,
+                planned_arms,
                 pair["pair_id"],
                 task["id"],
                 pair["repeat"].as_u64().context("repeat index")? + 1

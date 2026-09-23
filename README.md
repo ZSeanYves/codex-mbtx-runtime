@@ -8,6 +8,8 @@ We study whether **MoonBit programs can replace Shell programming and orchestrat
 
 The two arms receive the same task inputs, goals, model configuration, external utilities and common output budget. Shell uses Codex's execution tools. MBTX uses the `mbtx` extension, file editing and bounded `read_resource`; Shell and unified-exec tools are disabled in the MBTX arm and checked in captured model requests.
 
+New collections enable upstream Code Mode in both arms (`features.code_mode = true` and `features.code_mode_host = true`), adding JavaScript `exec`/`wait` orchestration alongside each arm's direct tools. Bundle preparation includes `codex-code-mode-host` and lets these feature flags select the tool mode. This changes the collection conditions from the completed pilots below, which disabled Code Mode; prepare a new bundle and run directory before collecting again.
+
 MBTX compiles MoonBit to Wasm and runs it with official MoonRun `--policy`, inside the existing Codex OS sandbox. `@shell.Cmd(program, args)` starts a program with literal arguments; it does not interpret Shell syntax. MoonBit provides control flow and error handling, and may use task-declared `jq`, safe `rg` forms and `fixture-worker` actions. Git is not registered by default. Shell, Python, Node, arbitrary paths and forwarding entries such as worker `launch` are denied. Tool declarations generate both policy and task guidance. The host PATH resolves to recorded, read-only utility entries.
 
 Policy constrains **direct process requests**. We prohibit indirect execution features, but do not claim comprehensive control or auditing of every descendant process. Codex's filesystem/network sandbox remains active; ordinary IP networking is not opened. Worker receipts use the existing AF_UNIX channel. Native policy denial stderr is observed evidence; unreported argv, request identity and complete process totals remain unknown.
@@ -152,6 +154,17 @@ moon run mbtx/scripts/collect-study.mbtx relay --suite all \
 ```
 
 This starts at pair index 10 and attempts three pairs, retaining the rest of the suffix as unstarted. It does not import or overwrite earlier attempts. Pass the same `--start-pair` when resuming that run. Before collecting corrections, record affected tasks/repeats, both arms, reasons and source-run mappings, independently of their scores. Preserve originals and distinguish bundle/protocol versions when combining results. Ordinary model failures are not grounds for replacement.
+
+For a correction that affects individual arms, use `--slots` with the exact frozen pair ID and arm. The complete schedule remains in the manifest, while unlisted arms and pairs are skipped:
+
+```bash
+/path/to/frozen/bundle/mbtx-eval run --mode relay \
+  --bundle /absolute/path/to/corrected/bundle \
+  --output /absolute/path/to/slot-correction-run \
+  --slots pair-0016/mbtx_program,pair-0016/shell_tool,pair-0027/mbtx_program
+```
+
+Slot IDs are validated against the complete selected schedule and are recorded under `schedule_selection.slots`. They cannot be combined with a nonzero `--start-pair`; use `--resume` with the same slot list to continue an interrupted slot run.
 
 To rebuild an existing report, use **that run's frozen bundle**:
 

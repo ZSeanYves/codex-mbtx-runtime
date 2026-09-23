@@ -26,6 +26,18 @@ fn payload(bundle: &Path, trace: &Value, id: &Value) -> Result<Value> {
     read_json(&path)
 }
 
+fn materialized_response_output(result: &Value) -> Value {
+    let response = &result["response_item"];
+    let output = if response["type"] == "code_mode_response" {
+        response["value"]["output"].as_str()
+    } else {
+        response["output"].as_str()
+    };
+    output
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+        .unwrap_or(Value::Null)
+}
+
 pub(crate) fn tool_results(bundle: &Path, trace: &Value) -> Value {
     let mut results = serde_json::Map::new();
     for (id, tool) in trace["tool_calls"].as_object().into_iter().flatten() {
@@ -37,10 +49,7 @@ pub(crate) fn tool_results(bundle: &Path, trace: &Value) -> Value {
                     .as_str()
                     .and_then(|s| serde_json::from_str::<Value>(s).ok())
                     .unwrap_or(Value::Null);
-                let output = result["response_item"]["output"]
-                    .as_str()
-                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
-                    .unwrap_or(Value::Null);
+                let output = materialized_response_output(&result);
                 json!({"arguments":arguments,"output":output,"invocation":invocation,"model_visible_result":result,"evidence":tool["raw_result_payload_id"]})
             }
             (a, b) => {
@@ -141,3 +150,7 @@ pub(crate) fn collect(directory: &Path) -> Result<Value> {
         "scope":"All retained native payloads and output resources; model-private reasoning is not observed. HTTP wire bytes are in the raw evidence archive."}),
     )
 }
+
+#[cfg(test)]
+#[path = "report_details_tests.rs"]
+mod tests;

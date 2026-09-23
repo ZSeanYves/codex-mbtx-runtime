@@ -9,7 +9,12 @@ fn checks_direct_and_namespaced_tools_without_silently_skipping_absent_schemas()
         } else {
             "mbtx"
         };
-        let tools = json!([{"type":"function","name":name},{"type":"custom","name":"apply_patch"}]);
+        let tools = json!([
+            {"type":"function","name":name},
+            {"type":"custom","name":"apply_patch"},
+            {"type":"custom","name":"exec"},
+            {"type":"function","name":"wait"}
+        ]);
         for mut body in [
             json!({"input":[],"tools":tools}),
             json!({"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":tools}]}]}),
@@ -26,6 +31,15 @@ fn checks_direct_and_namespaced_tools_without_silently_skipping_absent_schemas()
         }
     }
     assert!(validate(&json!({"input":[]}), "mbtx_program").is_err());
+    for arm in ["shell_tool", "mbtx_program"] {
+        assert!(
+            validate(
+                &json!({"input":[],"tools":[{"name":"exec"},{"name":"wait"}]}),
+                arm
+            )
+            .is_err()
+        );
+    }
     assert!(validate(&json!({"input":[],"tools":"invalid"}), "shell_tool").is_err());
     assert!(validate(&json!({"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"collaboration","tools":[{"name":"spawn_agent"}]}]}]}), "mbtx_program").is_err());
 }

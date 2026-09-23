@@ -189,12 +189,15 @@ async fn main {
         _ =>
           "_build/reference-validation/build/examples.mbtx/wasm/release/build/single/single.wasm"
       }
-      let products = if name == "adapter" {
+      let products = if name == "codex" {
+        [product, "codex-rs/target/debug/codex-code-mode-host"]
+      } else if name == "adapter" {
         [product, "codex-rs/target/debug/mbtx-fixture-worker"]
       } else if name == "reference" {
-        [product,
-         "_build/reference-validation/build/process-examples.mbtx/wasm/release/build/single/single.wasm",
-         "_build/reference-validation/build/example.mbtx/wasm/release/build/single/single.wasm"]
+        [
+          product, "_build/reference-validation/build/process-examples.mbtx/wasm/release/build/single/single.wasm",
+          "_build/reference-validation/build/example.mbtx/wasm/release/build/single/single.wasm",
+        ]
       } else {
         [product]
       }
@@ -204,6 +207,10 @@ async fn main {
           fingerprint(products, "built products")
         @fs.read_file(stamp).text().trim() == receipt[:] &&
         @fs.exists(product) &&
+        (
+          name != "codex" ||
+          @fs.exists("codex-rs/target/debug/codex-code-mode-host")
+        ) &&
         (
           name != "adapter" ||
           @fs.exists("codex-rs/target/debug/mbtx-fixture-worker")
@@ -217,7 +224,10 @@ async fn main {
           "codex" | "adapter" => {
             let args = ["build", "--locked", "-j", "4"]
             if name == "codex" {
-              args.append(["-p", "codex-cli", "--bin", "codex"])
+              args.append([
+                "-p", "codex-cli", "--bin", "codex", "-p", "codex-code-mode-host",
+                "--bin", "codex-code-mode-host",
+              ])
             } else {
               args.append([
                 "-p", "codex-mbtx-eval", "--bin", "mbtx-eval", "--bin", "mbtx-fixture-worker",

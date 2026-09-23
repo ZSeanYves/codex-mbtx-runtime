@@ -9,6 +9,67 @@ use pretty_assertions::assert_eq;
 use std::sync::atomic::Ordering;
 
 #[test]
+fn exact_slots_validate_against_the_complete_schedule() -> Result<()> {
+    let schedule = vec![
+        json!({"pair_id":"pair-0016","arms":["shell_tool","mbtx_program"]}),
+        json!({"pair_id":"pair-0027","arms":["mbtx_program","shell_tool"]}),
+    ];
+    let slots = validate_slots(
+        &[
+            "pair-0016/mbtx_program".into(),
+            "pair-0016/shell_tool".into(),
+            "pair-0027/mbtx_program".into(),
+        ],
+        &schedule,
+    )?;
+    assert_eq!(
+        slots,
+        [
+            "pair-0016/mbtx_program",
+            "pair-0016/shell_tool",
+            "pair-0027/mbtx_program",
+        ]
+    );
+    assert!(validate_slots(&["pair-0016/unknown".into()], &schedule).is_err());
+    assert!(validate_slots(&["pair-0001/shell_tool".into()], &schedule).is_err());
+    assert!(
+        validate_slots(
+            &[
+                "pair-0016/mbtx_program".into(),
+                "pair-0016/mbtx_program".into()
+            ],
+            &schedule,
+        )
+        .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn unselected_slots_are_not_counted_or_run() {
+    let schedule = vec![
+        json!({"pair_id":"pair-0016","arms":["shell_tool","mbtx_program"]}),
+        json!({"pair_id":"pair-0027","arms":["mbtx_program","shell_tool"]}),
+    ];
+    let manifest = json!({"schedule_selection":{"slots":[
+        "pair-0016/mbtx_program",
+        "pair-0016/shell_tool",
+        "pair-0027/mbtx_program"
+    ]}});
+    assert_eq!(selected_arm_count(&manifest, &schedule), 3);
+    assert!(slot_selected(
+        &manifest,
+        &json!("pair-0016"),
+        &json!("mbtx_program")
+    ));
+    assert!(!slot_selected(
+        &manifest,
+        &json!("pair-0027"),
+        &json!("shell_tool")
+    ));
+}
+
+#[test]
 fn seeded_assignment_preserves_pairs_and_reverses_each_input_between_rounds() {
     let tasks = vec![
         json!({"id":"a","scenario":"one","family":"text","variant":0}),

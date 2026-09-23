@@ -143,6 +143,12 @@ async fn main() -> Result<()> {
                 )?,
                 None => 0,
             };
+            let slots = manifest
+                .get("schedule_selection")
+                .and_then(|selection| selection.get("slots"))
+                .map(|slots| serde_json::from_value(slots.clone()))
+                .transpose()?
+                .unwrap_or_default();
             let config_path =
                 output.with_extension(format!("config-{}.toml", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(config_path.parent().context("output parent")?)?;
@@ -176,6 +182,7 @@ async fn main() -> Result<()> {
                 min_interval_ms: 15000,
                 tasks,
                 scenarios: vec![],
+                slots,
                 resume: false,
                 replay_source: Some(run.canonicalize()?),
                 replay_fault: None,

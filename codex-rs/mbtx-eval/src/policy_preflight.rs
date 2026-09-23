@@ -26,6 +26,7 @@ pub(crate) async fn check(execution: &crate::attempt::Execution<'_>) -> Result<(
     let receipts = crate::worker_receipts::WorkerReceipts::start(
         &evidence,
         &execution.bundle.join("fixture-worker"),
+        &work.join("workspace"),
     )
     .await?;
     crate::evidence::json_new(&work.join("worker-socket.json"), &json!(receipts.socket))?;

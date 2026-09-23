@@ -19,9 +19,10 @@ pub(crate) fn receipt(phase: &str, args: &[String], exit_code: Option<u8>) -> Re
     };
     let mut connection = std::os::unix::net::UnixStream::connect(socket)?;
     connection.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
+    let cwd = std::env::current_dir()?;
     serde_json::to_writer(
         &mut connection,
-        &json!({"phase":phase,"action":args.first(),"id":args.get(2),"path":if args.first().is_some_and(|a|a=="hash"){args.get(1)}else{None},"args":args,"exit_code":exit_code}),
+        &json!({"phase":phase,"action":args.first(),"id":args.get(2),"path":if args.first().is_some_and(|a| matches!(a.as_str(), "hash" | "job" | "recover" | "emit")){args.get(1)}else{None},"cwd":cwd,"args":args,"exit_code":exit_code}),
     )?;
     connection.write_all(b"\n")?;
     let mut response = String::new();

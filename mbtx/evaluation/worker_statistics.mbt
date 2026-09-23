@@ -5,8 +5,7 @@ fn worker_statistics(records : Array[Json]) -> Json {
   let actions : Map[String, Json] = Map([])
   let names : Array[String] = []
   let trusted = records.filter(r => {
-    field(r, "confidence") == Json::string("observed") &&
-    field(r, "evidence_error") == Json::null()
+    trusted_worker_record(r) && field(r, "evidence_error") == Json::null()
   })
   for r in trusted {
     if field(field(r, "event"), "action") is String(action) &&

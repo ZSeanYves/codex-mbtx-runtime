@@ -3,6 +3,7 @@ use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Read;
 use std::io::Seek;
@@ -39,7 +40,16 @@ impl Tail {
 
 pub(crate) async fn log(root: &Path, follow: bool) -> Result<()> {
     let manifest = crate::evidence::read_json(&root.join("run.json"))?;
-    let planned = manifest["schedule"].as_array().map_or(0, Vec::len);
+    let schedule = manifest["schedule"].as_array().cloned().unwrap_or_default();
+    let selected_slots = manifest["schedule_selection"]["slots"].as_array();
+    let planned = selected_slots.map_or(schedule.len(), |slots| {
+        slots
+            .iter()
+            .filter_map(|slot| slot.as_str()?.split_once('/').map(|(pair, _)| pair))
+            .collect::<BTreeSet<_>>()
+            .len()
+    });
+    let planned_arms = selected_slots.map_or(planned * 2, Vec::len);
     let mut tails = BTreeMap::<PathBuf, Tail>::new();
     let mut finished = BTreeMap::<String, Value>::new();
     let mut steps = BTreeMap::<String, (usize, usize)>::new();
@@ -81,10 +91,8 @@ pub(crate) async fn log(root: &Path, follow: bool) -> Result<()> {
             }
             current = json!({"assignment":assignment,"observed_steps_started":count.0,"observed_steps_accepted":count.1,"phase":if directory.join("model-outcome.json").exists() || directory.join("outcome.json").exists(){"verification / finalization"}else if directory.join("process.json").exists(){"Codex agent loop / external request / pacing"}else{"workspace preparation"}});
         }
-        let paired = manifest["schedule"]
-            .as_array()
-            .into_iter()
-            .flatten()
+        let paired = schedule
+            .iter()
             .filter(|p| {
                 finished
                     .values()
@@ -95,9 +103,9 @@ pub(crate) async fn log(root: &Path, follow: bool) -> Result<()> {
             .count();
         println!(
             "{}",
-            json!({"run_id":manifest["run_id"],"planned_pairs":planned,"finished_arms":finished.len(),"comparable_pairs":paired,"failed_arms":finished.values().filter(|a|a["status"]!="success").count(),"current":current,"remaining_arms":planned*2-finished.len().min(planned*2),"remaining_time_estimate":null,"scope":"incremental progress; final classifications are rebuilt from raw evidence"})
+            json!({"run_id":manifest["run_id"],"planned_pairs":planned,"finished_arms":finished.len(),"comparable_pairs":paired,"failed_arms":finished.values().filter(|a|a["status"]!="success").count(),"current":current,"remaining_arms":planned_arms-finished.len().min(planned_arms),"remaining_time_estimate":null,"scope":"incremental progress; final classifications are rebuilt from raw evidence"})
         );
-        if !follow || finished.len() >= planned * 2 {
+        if !follow || finished.len() >= planned_arms {
             break;
         }
         #[cfg(unix)]

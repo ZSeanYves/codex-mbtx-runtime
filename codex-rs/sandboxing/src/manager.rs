@@ -521,7 +521,9 @@ impl SandboxManager {
                     .flat_map(|context| &context.allow_unix_sockets)
                     .map(AbsolutePathBuf::from_absolute_path)
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|error| SandboxTransformError::EnvironmentNetworkProxy(error.to_string()))?;
+                    .map_err(|error| {
+                        SandboxTransformError::EnvironmentNetworkProxy(error.to_string())
+                    })?;
                 let managed_network =
                     enforce_managed_network.then(|| command.managed_network.unwrap_or_default());
                 #[cfg(target_os = "linux")]
@@ -533,15 +535,16 @@ impl SandboxManager {
                     managed_network.is_some(),
                     is_wsl1(),
                 )?;
-                let mut args = create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets(
-                    argv,
-                    pending.native_command_cwd.as_path(),
-                    &pending.effective_permission_profile,
-                    pending.native_sandbox_policy_cwd.as_path(),
-                    use_legacy_landlock,
-                    managed_network.as_ref(),
-                    &allow_unix_sockets,
-                );
+                let mut args =
+                    create_linux_sandbox_command_args_for_permission_profile_with_unix_sockets(
+                        argv,
+                        pending.native_command_cwd.as_path(),
+                        &pending.effective_permission_profile,
+                        pending.native_sandbox_policy_cwd.as_path(),
+                        use_legacy_landlock,
+                        managed_network.as_ref(),
+                        &allow_unix_sockets,
+                    );
                 let mut full_command = Vec::with_capacity(1 + args.len());
                 full_command.push(os_string_to_command_component(exe.as_os_str().to_owned()));
                 full_command.append(&mut args);

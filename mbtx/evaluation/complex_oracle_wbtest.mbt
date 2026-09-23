@@ -359,6 +359,45 @@ test "operation receipts distinguish help parsing diagnostics from actual extra 
 }
 
 ///|
+test "out-of-scope worker receipts remain untrusted" {
+  let task = v4_basic(5, 316)
+  let snapshot = v4_snapshot(task)
+  let records : Array[Json] = @json.from_json(field(snapshot, "worker_events"))
+  let external = match records[0] {
+    Object(record) => {
+      let copy = record.copy()
+      copy["scope"] = { "within_root": false, "cwd": "/tmp/model-copy" }
+      copy.to_json()
+    }
+    _ => abort("record")
+  }
+  assert_eq(
+    field(
+      task_oracle(task, {
+        "files": field(snapshot, "files"),
+        "errors": [],
+        "worker_events": [external].to_json(),
+      }),
+      "success",
+    ),
+    false.to_json(),
+  )
+  let combined = records.copy()
+  combined.push(external)
+  assert_eq(
+    field(
+      task_oracle(task, {
+        "files": field(snapshot, "files"),
+        "errors": [],
+        "worker_events": combined.to_json(),
+      }),
+      "success",
+    ),
+    true.to_json(),
+  )
+}
+
+///|
 test "valid initial dependency state permits downstream execution without a new predecessor receipt" {
   let task : Json = {
     "files": {

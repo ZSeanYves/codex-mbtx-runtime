@@ -191,8 +191,8 @@ fn long_migration(
     },
   }
   let base = long_plain({
-    goal: "Migrate the selected inherited configuration in layers.json to schema version 2. Traverse parents before children; shallow-merge accepted keys while preserving unrelated keys and labels. timeout_s must be a nonnegative integer; convert it to timeout_ms and remove timeout_s. enabled accepts only booleans or the strings true/false; normalize accepted strings to the corresponding JSON booleans in the v2 output. retries must be a nonnegative integer. Reject each invalid assignment and keep the inherited value, then continue applying valid assignments. Sort rejections by layer and key. Write migrated.json, rejected.json and result.json. Verify that applying the v2 normalization again would make no change. Do not alter layers.json.",
-    schema: "{config:object,rejected:[{layer:string,key:string,value:any}],applied_layers:string[]}",
+    goal: "Migrate the selected inherited configuration in layers.json to schema version 2. Traverse parents before children; shallow-merge accepted keys while preserving unrelated keys and labels. timeout_s must be a nonnegative integer; convert it to timeout_ms and remove timeout_s. enabled accepts only booleans or the strings true/false; normalize accepted strings to the corresponding JSON booleans in the v2 output. retries must be a nonnegative integer. Reject each invalid assignment and keep the inherited value, then continue applying valid assignments. Sort rejections by layer and key. Write migrated.json as the flat config object equal to result.config, rejected.json as the rejection array equal to result.rejected, and result.json as the {config,rejected,applied_layers} wrapper. Verify that applying the v2 normalization again would make no change. Do not alter layers.json.",
+    schema: "migrated.json:object; rejected.json:[{layer:string,key:string,value:any}]; result.json:{config:object,rejected:[{layer:string,key:string,value:any}],applied_layers:string[]}",
     files: {
       "layers.json": (
         {
@@ -216,5 +216,12 @@ fn long_migration(
       #|
     ),
   })
-  { ..base, outputs: { "migrated.json": config, "rejected.json": rejected }, }
+  {
+    ..base,
+    outputs: {
+      "migrated.json": config,
+      "rejected.json": rejected,
+      "result.json": expected,
+    },
+  }
 }

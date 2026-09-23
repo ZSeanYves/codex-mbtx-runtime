@@ -64,6 +64,10 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
         repo.join("codex-rs/target/debug/codex"),
         pending.join("codex"),
     )?;
+    fs::copy(
+        repo.join("codex-rs/target/debug/codex-code-mode-host"),
+        pending.join("codex-code-mode-host"),
+    )?;
     // MoonRun's host PATH intentionally excludes general utilities. The Linux
     // sandbox must resolve its existing launcher independently of that PATH.
     #[cfg(target_os = "linux")]
@@ -119,10 +123,13 @@ pub(crate) fn assemble(repo: &Path, output: &Path, fingerprint: &str) -> Result<
         pending.join("evaluation-model.wasm"),
     )?;
     let mut catalog = read_json(&repo.join("codex-rs/models-manager/models.json"))?;
-    // Both arms use the same frozen native-tools catalog. Preserve all other
-    // model capabilities; verify the actual transmitted tool schemas in the gate.
+    // Both arms select tool mode through the experiment's feature flags. Preserve
+    // all other capabilities; verify transmitted tool schemas in the gate.
     for model in catalog["models"].as_array_mut().context("model catalog")? {
-        model["tool_mode"] = json!("direct");
+        model
+            .as_object_mut()
+            .context("model entry")?
+            .remove("tool_mode");
     }
     json_new(&pending.join("models.json"), &catalog)?;
     // Publish dependency sources, not runtime locks or generated checks. The host

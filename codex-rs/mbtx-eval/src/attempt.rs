@@ -98,6 +98,7 @@ impl Execution<'_> {
         let receipts = crate::worker_receipts::WorkerReceipts::start(
             directory,
             &bundle.join("fixture-worker"),
+            &workspace,
         )
         .await?;
         json_new(&work.join("worker-socket.json"), &json!(receipts.socket))?;

@@ -27,7 +27,9 @@ pub(crate) async fn check(root: &Path, validator: &Validator<'_>) -> Result<()> 
     let input = b"local sandbox and receipt preflight\n";
     let path = work.join("workspace/input.txt");
     fs::write(&path, input)?;
-    let receipts = crate::worker_receipts::WorkerReceipts::start(&evidence, &worker).await?;
+    let receipts =
+        crate::worker_receipts::WorkerReceipts::start(&evidence, &worker, &work.join("workspace"))
+            .await?;
     json_new(&work.join("worker-socket.json"), &json!(receipts.socket))?;
     let result = async {
         let mut command = validator.command(&work, /*readable*/ None)?;
