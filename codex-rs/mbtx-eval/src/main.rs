@@ -24,6 +24,7 @@ mod scheduling;
 mod submission;
 mod submission_contract;
 mod submission_phases;
+mod task_contract;
 mod validation_process;
 mod worker_receipts;
 mod workspace;
@@ -169,6 +170,14 @@ async fn main() -> Result<()> {
                 suite: manifest["protocol"]["suite"]
                     .as_str()
                     .unwrap_or("pilot")
+                    .to_owned(),
+                execution_mode: manifest["condition"]["execution_mode"]
+                    .as_str()
+                    .unwrap_or("code_mode")
+                    .to_owned(),
+                capability_profile: manifest["condition"]["capability_profile"]
+                    .as_str()
+                    .unwrap_or("production")
                     .to_owned(),
                 config: config_path,
                 credentials_file: None,

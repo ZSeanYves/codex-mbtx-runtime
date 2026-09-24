@@ -74,3 +74,64 @@ fn independent_retry_limits_reach_both_arms_without_unbounded_fallback() -> Resu
     }
     Ok(())
 }
+
+#[test]
+fn condition_config_selects_catalog_and_records_tool_mode_metadata() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path();
+    fs::write(root.join("codex"), b"sandbox path fixture")?;
+    fs::write(root.join("models-direct.json"), b"{}")?;
+    fs::create_dir(root.join("worker-ipc"))?;
+    fs::write(
+        root.join("worker-socket.json"),
+        serde_json::to_vec(&root.join("worker-ipc/s"))?,
+    )?;
+    for folder in ["workspace", "home", "tmp"] {
+        fs::create_dir(root.join(folder))?;
+    }
+    let config = configuration(&root.join("relay.toml"), 1, 1)?;
+    let info = json!({
+        "moon_home":root,
+        "moon_path":root.join("moon"),
+        "moonrun_path":root.join("moonrun"),
+        "conditions":{"conditions":[{
+            "condition_id":"direct-mbtx-production",
+            "backend_arm":"mbtx",
+            "catalog_file":"models-direct.json",
+            "requested_tool_mode":"direct",
+            "effective_tool_mode":"direct",
+            "shell_type":"unified_exec",
+            "catalog_variant":"harness_direct",
+            "catalog_sha256":"catalog",
+            "policy_sha256":"policy",
+            "capability_profile":"production"
+        }]}
+    });
+    let rendered = child_config_for_condition(
+        &config,
+        root,
+        &info,
+        AttemptContext {
+            arm: "mbtx_program",
+            endpoint: "http://127.0.0.1:1/a/test/v1",
+            attempt_id: "test",
+            instructions: "Fixture",
+            work: root,
+            evidence: root,
+        },
+        "direct-mbtx-production",
+    )?;
+    let child: toml::Value = toml::from_str(&rendered)?;
+    let expected_catalog = root
+        .join("models-direct.json")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        child["model_catalog_json"].as_str(),
+        Some(expected_catalog.as_str())
+    );
+    assert_eq!(child["features"]["shell_tool"].as_bool(), Some(false));
+    assert!(rendered.contains("requested_tool_mode = direct"));
+    assert!(rendered.contains("effective_tool_mode = direct"));
+    Ok(())
+}

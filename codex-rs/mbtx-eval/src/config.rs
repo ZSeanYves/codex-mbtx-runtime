@@ -105,6 +105,79 @@ pub(crate) fn child_config(
     bundle_info: &Value,
     context: AttemptContext<'_>,
 ) -> Result<String> {
+    let mbtx = context.arm == "mbtx_program";
+    child_config_impl(
+        config,
+        bundle,
+        bundle_info,
+        context,
+        mbtx,
+        bundle.join("models.json"),
+        None,
+    )
+}
+
+/// Render a child configuration for a condition from the bundle manifest.
+///
+/// The legacy [`child_config`] entry point remains available for replaying old
+/// runs. New collection code should pass a condition ID so the exact catalog,
+/// tool mode and feature snapshot are recorded in the effective config.
+pub(crate) fn child_config_for_condition(
+    config: &RelayConfig,
+    bundle: &Path,
+    bundle_info: &Value,
+    context: AttemptContext<'_>,
+    condition_id: &str,
+) -> Result<String> {
+    let conditions = bundle_info["conditions"]["conditions"]
+        .as_array()
+        .context("bundle condition manifest")?;
+    let condition = conditions
+        .iter()
+        .find(|condition| condition["condition_id"].as_str() == Some(condition_id))
+        .with_context(|| format!("unknown bundle condition {condition_id}"))?;
+    let backend_arm = condition["backend_arm"]
+        .as_str()
+        .context("condition backend arm")?;
+    let expected_arm = if backend_arm == "mbtx" {
+        "mbtx_program"
+    } else {
+        "shell_tool"
+    };
+    ensure!(
+        context.arm == expected_arm,
+        "condition {condition_id} assigns {backend_arm}, but route uses {}",
+        context.arm
+    );
+    let catalog_file = condition["catalog_file"]
+        .as_str()
+        .context("condition catalog file")?;
+    let catalog = bundle.join(catalog_file);
+    ensure!(
+        catalog.is_file(),
+        "condition catalog is missing: {}",
+        catalog.display()
+    );
+    child_config_impl(
+        config,
+        bundle,
+        bundle_info,
+        context,
+        backend_arm == "mbtx",
+        catalog,
+        Some(condition),
+    )
+}
+
+fn child_config_impl(
+    config: &RelayConfig,
+    bundle: &Path,
+    bundle_info: &Value,
+    context: AttemptContext<'_>,
+    mbtx: bool,
+    catalog_path: impl AsRef<Path>,
+    condition: Option<&Value>,
+) -> Result<String> {
     let AttemptContext {
         arm,
         endpoint,
@@ -114,7 +187,6 @@ pub(crate) fn child_config(
         evidence,
     } = context;
     let provider = config.provider()?;
-    let mbtx = arm == "mbtx_program";
     let mut value = toml::Table::new();
     for (key, text) in [
         ("model_provider", config.model_provider.as_str()),
@@ -131,7 +203,7 @@ pub(crate) fn child_config(
     }
     value.insert(
         "model_catalog_json".into(),
-        bundle.join("models.json").to_string_lossy().as_ref().into(),
+        catalog_path.as_ref().to_string_lossy().as_ref().into(),
     );
     value.insert("tool_output_token_limit".into(), 4096.into());
     let socket: String = serde_json::from_slice(&fs::read(work.join("worker-socket.json"))?)?;
@@ -195,6 +267,8 @@ pub(crate) fn child_config(
             ("code_mode", true),
             ("code_mode_only", false),
             ("code_mode_host", true),
+            ("code_mode_prewarm", true),
+            ("code_mode_interrupt", true),
             ("multi_agent_v2", false),
             ("plugins", false),
             ("apps", false),
@@ -268,7 +342,33 @@ pub(crate) fn child_config(
         ]))?,
     );
     value.insert("otel".into(), otel.into());
-    Ok(toml::to_string_pretty(&value)?)
+    let rendered = toml::to_string_pretty(&value)?;
+    if let Some(condition) = condition {
+        let condition_id = condition["condition_id"].as_str().context("condition ID")?;
+        let requested = condition["requested_tool_mode"]
+            .as_str()
+            .context("requested tool mode")?;
+        let effective = condition["effective_tool_mode"]
+            .as_str()
+            .context("effective tool mode")?;
+        let shell_type = condition["shell_type"].as_str().context("shell type")?;
+        let catalog_variant = condition["catalog_variant"]
+            .as_str()
+            .context("catalog variant")?;
+        let catalog_sha256 = condition["catalog_sha256"]
+            .as_str()
+            .context("catalog hash")?;
+        let policy_sha256 = condition["policy_sha256"].as_str().context("policy hash")?;
+        let capability_profile = condition["capability_profile"]
+            .as_str()
+            .context("capability profile")?;
+        let backend_arm = condition["backend_arm"].as_str().context("backend arm")?;
+        Ok(format!(
+            "# evaluation_condition_id = {condition_id}\n# backend_arm = {backend_arm}\n# capability_profile = {capability_profile}\n# catalog_variant = {catalog_variant}\n# catalog_sha256 = {catalog_sha256}\n# policy_sha256 = {policy_sha256}\n# requested_tool_mode = {requested}\n# effective_tool_mode = {effective}\n# shell_type = {shell_type}\n{rendered}"
+        ))
+    } else {
+        Ok(rendered)
+    }
 }
 
 #[cfg(test)]

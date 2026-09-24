@@ -223,6 +223,31 @@ fn csv_keeps_stage_counts_separate_from_unknown_child_totals() -> Result<()> {
 }
 
 #[test]
+fn correction_exports_do_not_invent_unselected_assignments() -> Result<()> {
+    let model = json!({
+        "pairs": [
+            {"pair_id":"p0", "assigned_arms":["mbtx_program"]},
+            {"pair_id":"p1", "assigned_arms":["mbtx_program"]},
+            {"pair_id":"p2", "assigned_arms":[]}
+        ],
+        "attempts": [{"pair_id":"p0", "arm":"mbtx_program", "status":"success"}]
+    });
+    let rows = table::rows(&model)?;
+    let selected: Vec<Vec<_>> = rows[1..]
+        .iter()
+        .map(|row| vec![row[19].as_str(), row[3].as_str(), row[4].as_str()])
+        .collect();
+    assert_eq!(
+        selected,
+        vec![
+            vec!["p0", "mbtx_program", "success"],
+            vec!["p1", "mbtx_program", "not_started"],
+        ]
+    );
+    Ok(())
+}
+
+#[test]
 fn track_exports_keep_unstarted_denominators_and_partial_interaction_observations() -> Result<()> {
     let model = json!({
         "by_track":[{"name":"basic","itt":{"shell_tool":{"assigned":2,"captured":1,"successes":0},"mbtx_program":{"assigned":2,"captured":0,"successes":0}},"conditional":{"pairs":0,"mean_step_difference":null}}],

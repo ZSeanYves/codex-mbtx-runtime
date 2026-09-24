@@ -2,15 +2,19 @@
 
 An experimental fork of [OpenAI Codex](https://github.com/openai/codex), maintained at [ZSeanYves/codex-mbtx-runtime](https://github.com/ZSeanYves/codex-mbtx-runtime). Upstream copyright, attribution and the [Apache-2.0 license](LICENSE) are retained. Upstream npm packages do **not** contain this fork's MBTX integration; build this repository to reproduce the experiment.
 
-We study whether **MoonBit programs can replace Shell programming and orchestration inside the same Codex workflow**, and how this affects model decision rounds, task completion and tool trajectories. This is a local research implementation, not a plugin distribution or a general security product.
+We study whether **MBTX can replace an Agent's default execution backend**, and how this affects task reliability, model decision rounds and execution costs. Direct and Code Mode conditions compare the same frozen model separately. This is a local research implementation, not a plugin distribution or a general security product.
+
+**Research direction:** the [V5 protocol draft](#v5-protocol-draft-programmatic-execution-and-reuse) replaces the earlier Shell/backend comparison as the proposed main study. It compares JS and MoonBit as peer programmatic execution entries, with equivalent controlled capabilities. V4 and natural calibration remain archived exploratory evidence. The current collector still implements those earlier protocols; selecting an existing mode/profile does not start V5.
 
 ## Comparison and execution boundary
 
 The two arms receive the same task inputs, goals, model configuration, external utilities and common output budget. Shell uses Codex's execution tools. MBTX uses the `mbtx` extension, file editing and bounded `read_resource`; Shell and unified-exec tools are disabled in the MBTX arm and checked in captured model requests.
 
-New collections enable upstream Code Mode in both arms (`features.code_mode = true` and `features.code_mode_host = true`), adding JavaScript `exec`/`wait` orchestration alongside each arm's direct tools. Bundle preparation includes `codex-code-mode-host` and lets these feature flags select the tool mode. This changes the collection conditions from the completed pilots below, which disabled Code Mode; prepare a new bundle and run directory before collecting again.
+New collections select `--execution-mode direct|code_mode` explicitly. Both enable the Code Mode feature and host, while `code_mode_only=false` leaves the effective mode to the frozen model catalog. Code Mode retains native `tool_mode=code_mode_only`; Direct changes only that field to `direct` and is a harness-controlled metadata variant. In Code Mode, `exec`/`wait` orchestrate the selected nested backend; Direct exposes backend tools directly. The gateway checks the assigned mode and backend before forwarding requests and rejects a fallback. Prepare a new bundle and run directory when these conditions change.
 
-MBTX compiles MoonBit to Wasm and runs it with official MoonRun `--policy`, inside the existing Codex OS sandbox. `@shell.Cmd(program, args)` starts a program with literal arguments; it does not interpret Shell syntax. MoonBit provides control flow and error handling, and may use task-declared `jq`, safe `rg` forms and `fixture-worker` actions. Git is not registered by default. Shell, Python, Node, arbitrary paths and forwarding entries such as worker `launch` are denied. Tool declarations generate both policy and task guidance. The host PATH resolves to recorded, read-only utility entries.
+The new `natural` calibration suite is separate from the frozen V4 comparison. It gives the normal execution arm a neutral task contract: Shell, Python, Node/JavaScript and other available project tools may be chosen freely, with no forced `solution.sh`. The MBTX arm uses MoonBit as its scripting surface and direct process entry; its task policy admits `jq`, `rg`, Git and the bundled MoonBit toolchain while leaving `sh`, `bash`, Python and Node out of the direct MBTX vocabulary. The calibration has two small workflow tasks and is intended to inspect natural tool choice before a larger run, not to produce a benchmark estimate.
+
+MBTX compiles MoonBit to Wasm and runs it with official MoonRun `--policy`, inside the existing Codex OS sandbox. `@shell.Cmd(program, args)` starts a program with literal arguments; it does not interpret Shell syntax. MoonBit provides control flow and error handling, and each protocol declares its direct programs: frozen V4 uses task-declared `jq`, safe `rg` forms and `fixture-worker` actions; the natural calibration additionally admits Git and the bundled MoonBit toolchain. Shell, Python, Node, arbitrary paths and forwarding entries such as worker `launch` remain outside the direct MBTX vocabulary. Tool declarations generate both policy and task guidance. The host PATH resolves to recorded, read-only utility entries.
 
 Policy constrains **direct process requests**. We prohibit indirect execution features, but do not claim comprehensive control or auditing of every descendant process. Codex's filesystem/network sandbox remains active; ordinary IP networking is not opened. Worker receipts use the existing AF_UNIX channel. Native policy denial stderr is observed evidence; unreported argv, request identity and complete process totals remain unknown.
 
@@ -27,6 +31,86 @@ Policy constrains **direct process requests**. We prohibit indirect execution fe
 | `mbtx/scripts` | Bundle preparation, one collection entry and offline validation |
 
 Keep research rules in the MoonBit evaluator and OS/transport behavior in the Rust adapter. The evaluator does not depend on `codex-core`. Reference programs are private offline validation inputs; they are never supplied as task answers to a model. Full raw outputs remain archived even when the model receives a shortened, explicitly derived diagnostic preview.
+
+## V5 protocol draft: programmatic execution and reuse
+
+Status: research design draft, dated 2026-09-24. No V5 task suite, tool bridge or collection has been enabled by this document. Task instances, repetition count, budgets and final acceptance rules must be frozen after separate calibration and before scored collection. No new collection under the old matrix is needed to establish this design.
+
+### Question and comparison
+
+The question is: **when an Agent performs real workflows through code and controlled capabilities, how do JS and MoonBit execution environments affect completion, decision steps, implementation strategy, error recovery and reuse?** A decrease in steps from Direct to Code Mode does not establish an MBTX advantage. The new study must be able to find benefits, regressions or no difference.
+
+| Main condition | Model's programmatic entry | Task capabilities |
+|---|---|---|
+| JS | JS execution runtime, with lifecycle controls | Shared controlled host APIs |
+| MBTX | MoonBit/Wasm execution runtime, with lifecycle controls | The same controlled host APIs |
+
+"Code mode" here describes both arms' programmatic architecture. Codex's `tool_mode=code_mode_only` specifically selects its JS entry; setting it on both arms currently produces Agent -> JS -> MBTX for the MBTX arm. V5 must expose MoonBit as the peer entry instead. The previous four-grid comparison measures backend integration and remains a separate historical study.
+
+No model-callable Shell, Python/Node process entry, generic process spawn, arbitrary command forwarding, or direct file-edit bypass belongs in the main conditions. File, repository, worker and service actions go through the shared capability interface. Trusted host implementations may use pinned native programs and the MBTX compiler/runtime; these infrastructure processes are recorded separately from authority available to generated scripts. Network-provider access also remains a host responsibility.
+
+The shared interfaces need equivalent schemas, operation granularity, errors, pagination, output limits, filesystem roots, cancellation and authorization. Do not give one arm a task-solving convenience tool while the other implements the same operation from primitives. Both sides must demonstrate positive access and denied escapes before collection. Removing Shell before providing replacement file/worker capabilities can make existing tasks impossible and is not a valid V5 configuration.
+
+### Task campaigns
+
+Use a sequence of related work episodes, with independent correctness checks for each episode and a campaign-level completion result. Inputs must require actual environment access and enough computation or service interaction that a tiny visible fixture does not dominate results through direct answer transcription. Do not require a particular algorithm, number of calls, parallelization strategy or single giant script.
+
+Candidate families, subject to independent feasibility calibration:
+
+| Family | Work episodes | Behavior to observe |
+|---|---|---|
+| Data reconciliation | Initial heterogeneous batch, new batch, changed schema/rules | Parsing and aggregation strategy, reusable processing, adaptation and input preservation |
+| Dependency and repository analysis | Initial graph, deeper/wider graph, changed components | Recursion versus explicit work stack, complete traversal, incremental work and overflow recovery |
+| Paginated service workflow | Multiple dependent queries, larger responses, changed source records | Filtering location, pagination, bounded output, batching and partial-result handling |
+| Stateful job processing | Dependency jobs, checkpointed update, controlled transient failure | Idempotency, resumption, duplicate effects, selective recomputation and retry behavior |
+
+Realistic output/depth constraints must be disclosed equally. Silently dropping records or narrowing the requested task after an overflow fails completeness checks even if the script exits successfully. Controlled service faults use frozen semantic request identities, inputs and attempt indices rather than wall time or global call order, so differing parallel schedules do not receive arbitrary fault advantages. Keep deliberate recoverable service faults separate from unexpected relay/runner faults.
+
+Publish all required outputs, field meanings, permitted mutations, completeness criteria and resource constraints before execution. Private graders may use new values and structures within that public contract; they must not introduce hidden schemas or new requirements. Do not supply expected fixture values. Deliverable-only tasks accept any permitted strategy that produces correct results. Reusable-program tasks explicitly require executable delivery and fresh-input validation from the outset; these task types have separate results.
+
+### Reuse as an observed behavior and an experiment
+
+Natural follow-up episodes observe whether the Agent saves and reuses code without an arm-specific instruction to do so. Both arms receive the same neutral permission and persistence description. Record attempted reuse and its failures; score successful reuse only when evidence links an earlier artifact to a later execution on new inputs and a correct result. Reading an old script, retaining its filename, or reporting that it was reused is insufficient.
+
+Distinguish unchanged-source execution, source modification with a recorded diff, copied/adapted code, cached compilation, reused data/checkpoints and copied outputs. Compile-cache hits are not source-reuse evidence. The exact-source category uses artifact hashes plus executed-artifact provenance; semantic adaptation needs a frozen review rubric and can remain unknown. Old output caches must be invalidated or identified independently of successful code reuse.
+
+A separate reuse study can branch from a frozen initial episode into **new sessions** with identical follow-up inputs and no conversation history: one branch receives the earlier code artifacts, the other starts without them. Reset compiled caches equally for this comparison. An additional continuing-session branch measures context/state persistence as a separate treatment. Do not compare successive follow-ups with different accumulated histories and call the difference a reuse effect.
+
+Record failures to produce an initial reusable artifact in the campaign denominator. Any reuse-effect estimate conditional on valid initial artifacts must disclose selection and use the prespecified common eligible set for a paired comparison; it is not an unconditional advantage. Never supply a failed arm with an oracle solution merely to let it enter later stages.
+
+Persisted files, module loading, helper composition, JS globals, Wasm process state, compilation caches and reset boundaries need explicit lifecycle manifests. Equalize intended state access; document residual runtime differences rather than claiming a language-only effect. The current MBTX file/process APIs and JS entry do not yet supply the equivalent general tool bridge and reusable artifact lifecycle required here.
+
+### Outcomes and evidence
+
+Agent decision steps remain the primary cost measure. Task and campaign completion must accompany costs; failures retain their observed step cost and have no steps-to-success value. Do not reward early failure by comparing successful-run step means alone.
+
+| Outcome | Required evidence |
+|---|---|
+| Completion | Independent artifact, coverage, invariant and side-effect checks; final and intermediate statuses separate |
+| Agent cost | Started/accepted steps, steps to success, model requests and transport retries |
+| Internal behavior | Parent step -> code cell/script hash -> capability calls -> returned results and effects |
+| Recovery | Initial error, changed source/strategy, retries, recovered state and remaining correctness |
+| Reuse | Artifact origin/hash/diff, actual later invocation, new input identity and validation result |
+| Work after a valid result | First observed valid checkpoint, final checkpoint, intervening calls/changes and any regression |
+| Execution cost | Cells, nested calls, source reads, compilation/runtime failures, time and cache state, reported separately from Agent steps |
+
+Reconstruct relevant workspace/service states at stable tool or cell boundaries. The first observed valid checkpoint is not proof of the earliest instant a task became correct. Grade checkpoints privately after execution; do not give the Agent early private-oracle feedback or terminate a run as soon as a hidden check passes. Separate useful verification, required checks, unchanged repetition, unnecessary recomputation and harmful regression using prespecified evidence criteria. Work after a valid artifact is not automatically waste.
+
+Analyze strategy from observable source, calls and outputs, not inferred hidden reasoning. Examples include iterative stack versus recursion, streaming versus loading all data, narrowing work after an error, batching, repeated lookup and local repair versus full rewrite. Freeze classification rules, include ambiguous/unknown cases, and review representative successes and failures rather than selecting only favorable traces. Step activities must include nested calls; a timeline that labels every activity only `exec` is insufficient.
+
+### Controls, attribution and collection gates
+
+Use one frozen model/provider/reasoning configuration, matched input seeds, equivalent task/developer guidance and a balanced execution order. SDK syntax and language-specific reference material necessarily differ: freeze both, disclose their sizes/coverage and audit semantic equivalence. Prompt is an experimental factor; do not tune only the losing arm after observing scores. Any alternative prompting or explicit reuse guidance belongs in a separately preregistered, balanced study.
+
+Specify two clocks separately: semantic deadlines required by the workflow and experiment-wide wall/budget limits. Continue serial relay collection with fixed pacing unless a later protocol explicitly changes it. Parallel calls inside a script are part of the observed strategy, not concurrent collectors. Task diversity and repetitions must be frozen before scoring; calibration results do not enter the main sample, and repetitions of a task family are not independent task definitions.
+
+Pair JS and MBTX at the whole workflow campaign level, with identical inputs and fault schedules in independent workspaces. Episodes, reuse branches and internal calls within a campaign are dependent observations, not extra independent samples. Report paired completion and cost differences with uncertainty at the campaign level, and disclose task-family clustering. A few balanced AB/BA runs can identify hypotheses but cannot establish a general or language-specific causal advantage.
+
+Keep the existing evidence-based failure classes and immutable corrections. Model compilation, algorithm, tool-argument and serialization mistakes remain outcomes. Failing to handle a deliberately injected, disclosed task-service fault is an outcome. Only evidenced provider transport, runner/worker, contract configuration or fixture/oracle defects qualify for correction; unresolved timeout remains censored. Freeze pair/slot scope before reruns and retain all originals.
+
+Before any V5 relay collection, require: shared API and no-bypass admission tests; working peer entries and equivalent lifecycle access; public contract/oracle audits; source-to-effect/nested trace completeness; saved-artifact execution on fresh inputs; cancellation/recovery and controlled-fault replay; and offline reference solutions in both languages. Prescribed replay only validates the harness. A separate small online calibration checks autonomous feasibility before the final task set, sample size and stopping rule are frozen.
+
+Implementation should start with the shared host capability contract and the MoonBit-to-host call bridge, using existing tool authorization/dispatch abstractions. Keep evaluation rules in `mbtx/evaluation` and OS/evidence adapters in `codex-rs/mbtx-eval`; avoid adding new concepts to `codex-core` where existing extension/runtime boundaries suffice. Then add paired task campaigns, artifact lifecycle and trace analysis, followed by calibration. Historical task generators, collectors and evidence must remain reproducible and are not silently converted into V5.
 
 ## Build and offline validation
 
@@ -49,7 +133,9 @@ moon run mbtx/scripts/validate-evaluation.mbtx --fast
 moon run mbtx/scripts/validate-evaluation.mbtx
 ```
 
-The fast path checks references, MoonBit, report rendering and affected Rust crates. The full offline entry prepares a fingerprinted bundle, validates both-arm task references, local sandbox/policy/worker preflight, fixed-response replay, retry faults, interruption and deterministic report rebuilding. It does not contact a model provider. Replay uses a local Responses server and actual Codex/tool execution; prescribed solutions verify the harness, **not autonomous model performance**. Preparation can reuse verified components or an existing identical bundle; it never means that changed source may reuse an incompatible executable.
+The fast path checks references, MoonBit, report rendering and affected Rust crates. The full offline entry prepares a fingerprinted bundle, validates both-arm task references, local sandbox/policy/worker preflight, fixed-response replay, retry faults, interruption and deterministic report rebuilding. It does not contact a model provider. Replay uses a local Responses server and actual Codex/tool execution; prescribed solutions verify the harness, **not autonomous model performance or task clarity**. Code Mode replay emits actual JavaScript `exec` cells and waits for their nested backend calls. Preparation can reuse verified components or an existing identical bundle; it never means that changed source may reuse an incompatible executable.
+
+Natural calibration v3 retains v2's explicit output filenames, schemas, ordering and extra-field rules, and publishes MBTX's mandatory process argument prefixes from the enforced policy. Collection audits the output contract against the grader before provider access, and checks that actual outbound requests contain the frozen goal and developer instructions. Earlier natural v1 results omitted output requirements; v2 still omitted MBTX's exact process argument forms. Preserve affected records as diagnostic evidence and correct them in new run directories with a prospective pair/slot mapping; do not silently regrade or overwrite them. Completed failures under a verified contract may be classified as model execution; missing contract or observation evidence cannot establish model fault. A strict JSON mismatch includes bounded file/field diagnostics. The capability-matched Shell admission gate is still unverified, so that profile remains exploratory.
 
 To prepare and inspect a bundle separately:
 
@@ -116,6 +202,8 @@ Never put credentials in repository files, reports or command output. Review `mb
 ```bash
 # Prescribed offline replay; no provider credential is needed.
 moon run mbtx/scripts/collect-study.mbtx replay --suite all
+# Small natural tool-choice calibration (new protocol, separate output).
+moon run mbtx/scripts/collect-study.mbtx replay --suite natural
 
 # Online collection; requires the credential and a prepared, verified bundle.
 moon run mbtx/scripts/collect-study.mbtx relay --suite all

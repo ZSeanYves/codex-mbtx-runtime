@@ -18,7 +18,7 @@ fn delivery_reference_is_independent_of_expected_answers_and_fixture_values() ->
 #[test]
 fn prescribed_delivery_saves_exact_source_and_does_not_spawn_shell() -> Result<()> {
     let task = json!({"family":"reusable-recovery-program","acceptance":"programs","required_source":{"mbtx_program":"solution.mbtx"},"output":"result.json","reference_shell":"sh never-execute-this.sh","reference_mbtx":"import {\"moonbitlang/async@0.21.3\",\"moonbitlang/async@0.21.3/shell\"}\nasync fn main { @shell.Cmd(\"fixture-worker\",[\"echo\"]).run() }"});
-    let replies = crate::replay::fixed(&task, "mbtx_program", 0)?;
+    let replies = crate::replay::fixed(&task, "mbtx_program", "direct", /*prefix_turns*/ 0)?;
     let event = String::from_utf8(replies[0].body.clone())?
         .lines()
         .filter_map(|line| line.strip_prefix("data: "))

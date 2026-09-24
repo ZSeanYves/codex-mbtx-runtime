@@ -101,6 +101,21 @@ pub(crate) async fn assess_attempt(
         .find(|t| t["id"] == assignment["task_id"])
         .cloned()
         .unwrap_or(Value::Null);
+    let expected_condition_id = manifest["condition"]["execution_mode"]
+        .as_str()
+        .zip(manifest["condition"]["capability_profile"].as_str())
+        .map(|(mode, profile)| {
+            format!(
+                "{}-{}-{}",
+                mode.replace('_', "-"),
+                if assignment["arm"] == "mbtx_program" {
+                    "mbtx"
+                } else {
+                    "shell"
+                },
+                profile.replace('_', "-")
+            )
+        });
     let mut errors = Vec::new();
     let mut tool_results = serde_json::Map::new();
     let assignment_valid = assignment["attempt_id"] == attempt_id.as_ref()
@@ -113,6 +128,7 @@ pub(crate) async fn assess_attempt(
                 p["pair_id"] == assignment["pair_id"] && p["task_id"] == assignment["task_id"]
             })
         })
+        && assignment["condition_id"].as_str() == expected_condition_id.as_deref()
         && !task.is_null();
     if !assignment_valid {
         errors
@@ -175,7 +191,7 @@ pub(crate) async fn assess_attempt(
     } else {
         Value::Null
     };
-    let facts = json!({"attempt_id":attempt_id,"pair_id":assignment["pair_id"],"arm":assignment["arm"],"trace":trace,"tool_results":tool_results,"snapshot":snapshot,"outcome":outcome,"workspace":read_json(&directory.join("workspace.json")).unwrap_or(Value::Null),"postprocess":read_json(&directory.join("postprocess.json")).unwrap_or(Value::Null),"submission":read_json(&directory.join("submission.json")).unwrap_or(Value::Null),"execution_error":read_json(&directory.join("execution-error.json")).unwrap_or(Value::Null),"exchanges":exchanges,"integrity":integrity,"evidence":{"directory":format!("attempts/{attempt_id}"),"errors":errors}});
+    let facts = json!({"attempt_id":attempt_id,"pair_id":assignment["pair_id"],"arm":assignment["arm"],"condition_id":assignment["condition_id"],"condition":read_json(&directory.join("condition.json")).unwrap_or(Value::Null),"trace":trace,"tool_results":tool_results,"snapshot":snapshot,"outcome":outcome,"workspace":read_json(&directory.join("workspace.json")).unwrap_or(Value::Null),"postprocess":read_json(&directory.join("postprocess.json")).unwrap_or(Value::Null),"submission":read_json(&directory.join("submission.json")).unwrap_or(Value::Null),"execution_error":read_json(&directory.join("execution-error.json")).unwrap_or(Value::Null),"exchanges":exchanges,"integrity":integrity,"evidence":{"directory":format!("attempts/{attempt_id}"),"errors":errors}});
     let result = analysis
         .query(json!({"op":"attempt","task":task,"facts":facts}))
         .await?;
@@ -356,8 +372,15 @@ pub(crate) async fn generate(
     let mut model = analysis
         .query(json!({"op":"report","manifest":manifest,"attempts":attempts}))
         .await?;
+    model["execution_mode"] = manifest["condition"]["execution_mode"].clone();
+    model["capability_profile"] = manifest["condition"]["capability_profile"].clone();
+    model["capability_matching"] = manifest["condition"]["capability_matching"].clone();
+    let execution_mode = model["execution_mode"].clone();
+    let capability_profile = model["capability_profile"].clone();
     model["method"] = json!({"manifest":manifest,"analyzer_bundle":read_json(&bundle.join("bundle.json"))?,"rendering":"ECharts 6.0.0; all data and assets embedded; no network requests"});
     for attempt in model["attempts"].as_array_mut().context("attempts")? {
+        attempt["execution_mode"] = execution_mode.clone();
+        attempt["capability_profile"] = capability_profile.clone();
         let directory = root.join("attempts").join(crate::evidence::safe_relative(
             attempt["attempt_id"].as_str().context("attempt id")?,
         )?);

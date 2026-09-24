@@ -135,6 +135,7 @@
     statuses = [
       "success",
       "task_failure",
+      "contract_error",
       "relay_error",
       "provider_error",
       "harness_error",
@@ -513,6 +514,7 @@
       disclosures(lane, "Tool-linked decision activities (may overlap)", attempt.interaction);
       disclosures(lane, "Direct process policy and executable hashes", attempt.details?.policy);
       disclosures(lane, "Layer evidence: observed, inferred and unknown", attempt.layer_evidence);
+      disclosures(lane, "Public task contract audit", attempt.contract_audit);
     }
   }
   function resource(parent, r) {

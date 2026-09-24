@@ -7,9 +7,10 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::config::RelayConfig;
-use crate::config::child_config;
+use crate::config::child_config_for_condition;
 use crate::evidence::json_new;
 use crate::evidence::now_ms;
+use crate::evidence::read_json;
 use crate::evidence::safe_relative;
 use crate::evidence::seal;
 use crate::evidence::snapshot;
@@ -127,12 +128,27 @@ impl Execution<'_> {
         let max_wall_seconds = manifest["max_wall_seconds"]
             .as_u64()
             .context("recorded attempt wall limit")?;
+        instructions.push_str(&crate::task_contract::process_instructions(
+            task, &route.arm,
+        )?);
+        crate::task_contract::record(directory, task, &instructions)?;
         let start = Instant::now();
         let cancellation = crate::cancellation::Cancellation::listen()?;
         let wall_start = now_ms().context("attempt wall clock")?;
         let deadline = start + Duration::from_secs(max_wall_seconds);
         let v3 = task.get("process_allow").is_some();
-        let mut toml = child_config(
+        let condition_id = read_json(&directory.join("assignment.json"))?["condition_id"]
+            .as_str()
+            .context("assigned condition id")?
+            .to_owned();
+        let condition = bundle_info["conditions"]["conditions"]
+            .as_array()
+            .context("bundle condition manifest")?
+            .iter()
+            .find(|condition| condition["condition_id"] == condition_id)
+            .with_context(|| format!("assigned condition {condition_id} is absent"))?;
+        json_new(&directory.join("condition.json"), condition)?;
+        let mut toml = child_config_for_condition(
             config,
             bundle,
             bundle_info,
@@ -144,6 +160,7 @@ impl Execution<'_> {
                 work: &work,
                 evidence: directory,
             },
+            &condition_id,
         )?;
         if v3 && route.arm == "mbtx_program" {
             let mut value: toml::Value = toml::from_str(&toml)?;

@@ -35,6 +35,13 @@ pub fn task_oracle(task : Json, snapshot : Json) -> Json raise {
     field(task, "expected_outputs") != Json::null() {
     return long_oracle(task, snapshot)
   }
+  if parsed != field(task, "expected") {
+    return artifact_mismatch(
+      output,
+      field(task, "expected"),
+      field(field(snapshot, "files"), output),
+    )
+  }
   {
     "success": (parsed == field(task, "expected")).to_json(),
     "reason": "Independent structured output comparison",

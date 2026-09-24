@@ -1,6 +1,7 @@
 //! Frozen, task-declared admission for direct MoonRun child requests.
 //! Native descendants are still governed by Codex's OS sandbox, not this policy.
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -22,14 +23,41 @@ pub(crate) fn rules(task: &Value) -> Result<Option<&Vec<Value>>> {
         return Ok(None);
     };
     let rules = value.as_array().context("process_allow must be an array")?;
+    let natural = match task["process_policy_profile"].as_str() {
+        Some(profile) => profile == "natural-direct-process-v1",
+        None => task["cohort"] == "natural-tool-choice",
+    };
+    let mut rules_seen = BTreeSet::new();
     for rule in rules {
+        ensure!(
+            rule.as_object().is_some_and(|object| object.len() == 2),
+            "unexpected process rule fields"
+        );
         let program = rule["program"].as_str().context("policy program")?;
+        ensure!(
+            !program.is_empty() && !program.contains('/'),
+            "invalid policy program"
+        );
+        ensure!(
+            program
+                .bytes()
+                .all(|byte| { byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-' }),
+            "invalid policy program"
+        );
         let args = rule["args_prefix"]
             .as_array()
             .context("policy argument prefix")?
             .iter()
-            .map(|arg| arg.as_str().context("policy argument must be text"))
+            .map(|arg| {
+                let arg = arg.as_str().context("policy argument must be text")?;
+                ensure!(!arg.contains('\0'), "policy argument contains NUL");
+                Ok(arg)
+            })
             .collect::<Result<Vec<_>>>()?;
+        ensure!(
+            rules_seen.insert((program.to_owned(), args.clone())),
+            "duplicate process rule for {program}"
+        );
         let allowed = match program {
             "jq" => args.is_empty(),
             "rg" => matches!(
@@ -40,15 +68,15 @@ pub(crate) fn rules(task: &Value) -> Result<Option<&Vec<Value>>> {
                 args.as_slice(),
                 ["square" | "checked-square" | "job" | "recover" | "emit" | "hash" | "echo"]
             ),
-            // No current pilot task needs Git. Its reference remains available,
-            // but adding another command requires a deliberate protocol revision.
+            // Natural tool-choice tasks may admit existing project tools. Empty
+            // prefixes mean that the program name is admitted for direct
+            // requests; OS sandboxing and descendant behavior remain separate
+            // evidence boundaries. Keep this profile-gated so a V4 task cannot
+            // silently widen its process vocabulary by adding a generic rule.
+            "git" | "moon" => natural && args.is_empty(),
             _ => false,
         };
         ensure!(allowed, "unsupported task process rule: {rule}");
-        ensure!(
-            rule.as_object().is_some_and(|object| object.len() == 2),
-            "unexpected process rule fields"
-        );
     }
     Ok(Some(rules))
 }
@@ -134,6 +162,8 @@ pub(crate) fn prepare(
         &json!({
             "sha256":sha256,"template_sha256":crate::evidence::digest(&serde_json::to_vec(rules)?),
             "executables":executables,"execution_path":execution_path,
+            "policy_profile":task["process_policy_profile"],
+            "task_cohort":task["cohort"],
             "scope":"direct MoonRun requests; no complete native-descendant or allowed-child audit",
             "process_spawns":null,"process_spawns_confidence":"unknown"
         }),

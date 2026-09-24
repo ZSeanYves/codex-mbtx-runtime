@@ -175,13 +175,17 @@ fn study_strata(
 ) -> Json raise {
   let labels : Map[String, Bool] = Map([])
   for pair in pairs {
-    labels[string_field(pair, key)] = true
+    if !report_assigned_arms(pair).is_empty() {
+      labels[string_field(pair, key)] = true
+    }
   }
   let names = labels.keys().to_array()
   names.sort()
   let result : Array[Json] = []
   for name in names {
-    let selected = pairs.filter(p => field(p, key) == name.to_json())
+    let selected = pairs.filter(p => {
+      field(p, key) == name.to_json() && !report_assigned_arms(p).is_empty()
+    })
     let selected_ids = selected.map(p => field(p, "pair_id"))
     let observed = attempts.filter(a => {
       selected_ids.contains(field(a, "pair_id"))
@@ -190,7 +194,10 @@ fn study_strata(
     for arm in ["shell_tool", "mbtx_program"] {
       let members = observed.filter(a => field(a, "arm") == arm.to_json())
       itt[arm] = {
-        "assigned": selected.length().to_json(),
+        "assigned": selected
+        .filter(p => report_assigned_arms(p).contains(arm))
+        .length()
+        .to_json(),
         "captured": members.length().to_json(),
         "successes": members
         .filter(a => field(a, "status") == Json::string("success"))

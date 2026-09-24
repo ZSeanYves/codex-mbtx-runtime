@@ -3,6 +3,7 @@ import {
   "moonbitlang/async@0.21.3",
   "moonbitlang/async@0.21.3/fs",
   "moonbitlang/async@0.21.3/shell",
+  "moonbitlang/core/env",
   "moonbitlang/core/json",
 }
 
@@ -89,11 +90,17 @@ async fn main {
     assert_eq(@shell.Cmd("fixture-worker", [action, "--help"]).output().exit_code(), 0)
   }
   assert_true(@shell.Cmd("fixture-worker", ["job", "jobs.json", "invalid/id"]).output().exit_code() != 0)
-  for
-    name in [
-      "sh", "bash", "dash", "python3", "node", "env", "xargs", "git", "bwrap", "/bin/sh",
-      "./jq",
-    ] {
+  let natural = @env.args().contains("--natural")
+  if natural {
+    assert_eq(@shell.Cmd("git", ["--version"]).output().exit_code(), 0)
+    assert_eq(@shell.Cmd("moon", ["--version"]).output().exit_code(), 0)
+  }
+  let denied_programs = if natural {
+    ["sh", "bash", "dash", "python3", "node", "env", "xargs", "bwrap", "/bin/sh", "./jq"]
+  } else {
+    ["sh", "bash", "dash", "python3", "node", "env", "xargs", "git", "bwrap", "/bin/sh", "./jq"]
+  }
+  for name in denied_programs {
     denied(name, ["-c", "exit 0"])
   }
   denied("fixture-worker", [
@@ -102,6 +109,10 @@ async fn main {
   denied("rg", ["--pre", "sh", "snow", "input.txt"])
   assert_false(@fs.exists("forbidden-marker"))
   println(
-    "policy preflight passed: allowed direct utilities, 13 rejected requests",
+    if natural {
+      "policy preflight passed: natural allowlist, 12 rejected requests"
+    } else {
+      "policy preflight passed: allowed direct utilities, 13 rejected requests"
+    },
   )
 }

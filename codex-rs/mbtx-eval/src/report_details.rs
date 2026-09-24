@@ -27,13 +27,14 @@ fn payload(bundle: &Path, trace: &Value, id: &Value) -> Result<Value> {
 }
 
 fn materialized_response_output(result: &Value) -> Value {
-    let response = &result["response_item"];
-    let output = if response["type"] == "code_mode_response" {
-        response["value"]["output"].as_str()
-    } else {
-        response["output"].as_str()
-    };
-    output
+    // Nested calls are recorded as CodeModeResponse directly and their value
+    // is already structured JSON. Direct calls use a response_item wrapper.
+    let response = result.get("response_item").unwrap_or(result);
+    if response["type"] == "code_mode_response" {
+        return response["value"].clone();
+    }
+    response["output"]
+        .as_str()
         .and_then(|value| serde_json::from_str::<Value>(value).ok())
         .unwrap_or(Value::Null)
 }

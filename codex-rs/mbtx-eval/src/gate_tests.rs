@@ -4,6 +4,82 @@ use pretty_assertions::assert_eq;
 use std::sync::atomic::AtomicUsize;
 
 #[tokio::test]
+async fn prescribed_code_mode_replay_waits_without_consuming_the_final_reply() -> Result<()> {
+    let gate = Gate::start("http://127.0.0.1:1".into(), "unused".into(), Duration::ZERO).await?;
+    let temp = tempfile::tempdir()?;
+    std::fs::create_dir(temp.path().join("http"))?;
+    let replies = crate::replay::fixed(
+        &json!({"reference_mbtx":"fn main { println(42) }"}),
+        "mbtx_program",
+        "code_mode",
+        /*prefix_turns*/ 0,
+    )?;
+    let route = gate
+        .add(
+            "cells".into(),
+            Route {
+                directory: temp.path().to_owned(),
+                arm: "mbtx_program".into(),
+                execution_mode: "code_mode".into(),
+                token: "local".into(),
+                replies: Some(replies),
+                active: AtomicBool::new(true),
+                requests: AtomicUsize::new(0),
+                replay_cursor: AtomicUsize::new(0),
+                otel_requests: AtomicUsize::new(0),
+                observation_failures: AtomicUsize::new(0),
+                closed: Notify::new(),
+                otel_write: std::sync::Mutex::new(()),
+            },
+        )
+        .await;
+    let client = reqwest::Client::builder().no_proxy().build()?;
+    let mut body = json!({"input":[], "tools":[{"name":"exec","description":"declare const tools: { mbtx(args: {}): Promise<unknown>; };"},{"name":"wait"}]});
+    let mut calls = Vec::new();
+    for expected in ["exec", "wait", "message"] {
+        let response = client
+            .post(format!("{}/a/cells/v1/responses", gate.endpoint))
+            .bearer_auth("local")
+            .json(&body)
+            .send()
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let text = response.text().await?;
+        let event = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .find(|event| event["type"] == "response.output_item.done")
+            .context("replay output")?;
+        let call = event["item"].clone();
+        if expected == "message" {
+            assert_eq!(call["type"], "message");
+        } else {
+            assert_eq!(call["name"], expected);
+            let output = if expected == "exec" {
+                "Script running with cell ID observed-cell\npartial"
+            } else {
+                "Script completed\n42"
+            };
+            calls.extend([call.clone(), json!({"type":if expected == "exec" {"custom_tool_call_output"} else {"function_call_output"}, "call_id":call["call_id"], "output":output})]);
+            body["input"] = json!(calls);
+        }
+    }
+    assert_eq!(
+        (
+            route.requests.load(Ordering::SeqCst),
+            route.replay_cursor.load(Ordering::SeqCst)
+        ),
+        (3, 2)
+    );
+    assert_eq!(route.observation_failures.load(Ordering::SeqCst), 0);
+    gate.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn active_stream_continues_to_upstream_completion() -> Result<()> {
     streamed_response(StreamEnd::Complete).await
 }
@@ -54,10 +130,12 @@ async fn streamed_response(end: StreamEnd) -> Result<()> {
             Route {
                 directory: temp.path().to_owned(),
                 arm: "probe".into(),
+                execution_mode: "direct".into(),
                 token: "local".into(),
                 replies: None,
                 active: AtomicBool::new(true),
                 requests: AtomicUsize::new(0),
+                replay_cursor: AtomicUsize::new(0),
                 otel_requests: AtomicUsize::new(0),
                 observation_failures: AtomicUsize::new(0),
                 closed: Notify::new(),
@@ -157,10 +235,12 @@ async fn send_transport_failure_retains_typed_flags_without_upstream_url() -> Re
         Route {
             directory: temp.path().to_owned(),
             arm: "probe".into(),
+            execution_mode: "direct".into(),
             token: "local".into(),
             replies: None,
             active: AtomicBool::new(true),
             requests: AtomicUsize::new(0),
+            replay_cursor: AtomicUsize::new(0),
             otel_requests: AtomicUsize::new(0),
             observation_failures: AtomicUsize::new(0),
             closed: Notify::new(),
@@ -246,10 +326,12 @@ async fn preheader_cancellation(client: WaitingClient) -> Result<()> {
             Route {
                 directory: temp.path().to_owned(),
                 arm: "probe".into(),
+                execution_mode: "direct".into(),
                 token: "local".into(),
                 replies: None,
                 active: AtomicBool::new(true),
                 requests: AtomicUsize::new(0),
+                replay_cursor: AtomicUsize::new(0),
                 otel_requests: AtomicUsize::new(0),
                 observation_failures: AtomicUsize::new(0),
                 closed: Notify::new(),
@@ -367,10 +449,12 @@ async fn serializes_entire_stream_and_records_wire_failures_without_key() -> Res
             Route {
                 directory: temp.path().to_owned(),
                 arm: "probe".into(),
+                execution_mode: "direct".into(),
                 token: "local".into(),
                 replies: None,
                 active: AtomicBool::new(true),
                 requests: AtomicUsize::new(0),
+                replay_cursor: AtomicUsize::new(0),
                 otel_requests: AtomicUsize::new(0),
                 observation_failures: AtomicUsize::new(0),
                 closed: Notify::new(),

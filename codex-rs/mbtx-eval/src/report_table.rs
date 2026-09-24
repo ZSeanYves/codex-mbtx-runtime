@@ -51,6 +51,11 @@ pub(super) fn rows(model: &Value) -> Result<Vec<Vec<String>>> {
         "Observed started decision prefix".into(),
         "Track assigned denominator".into(),
         "Track successes".into(),
+        "Failure class".into(),
+        "Rerun eligible".into(),
+        "Execution mode".into(),
+        "Capability profile".into(),
+        "Condition".into(),
     ]];
     for a in model["attempts"].as_array().context("attempts")? {
         rows.push(vec![
@@ -109,10 +114,21 @@ pub(super) fn rows(model: &Value) -> Result<Vec<Vec<String>>> {
             cell(&a["accounting"]["observed"]["agent_steps_started"]),
             cell(&track_arm(model, &a["track"], &a["arm"])["assigned"]),
             cell(&track_arm(model, &a["track"], &a["arm"])["successes"]),
+            cell(&a["failure_class"]),
+            cell(&a["rerun_eligible"]),
+            cell(&a["execution_mode"]),
+            cell(&a["capability_profile"]),
+            cell(&a["condition_id"]),
         ]);
     }
     for pair in model["pairs"].as_array().into_iter().flatten() {
         for arm in ["shell_tool", "mbtx_program"] {
+            if pair["assigned_arms"]
+                .as_array()
+                .is_some_and(|assigned| !assigned.iter().any(|value| value == arm))
+            {
+                continue;
+            }
             if model["attempts"]
                 .as_array()
                 .into_iter()

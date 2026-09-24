@@ -59,6 +59,15 @@ fn suite_v4(track : String) -> Json raise {
     "protocol_id": "programmable-shell-replacement-v4",
     "suite": track.to_json(),
     "population": "Ten classic basic capabilities and two workflow families at three difficulty tiers; two repetitions nested in each fixed task. Descriptive evidence only.",
+    "experiment": {
+      "study": "agent-execution-backend-v1",
+      "stage": "v4-main",
+      "calibration_only": false,
+      "execution_modes": ["direct", "code_mode"],
+      "backend_arms": ["shell_tool", "mbtx_program"],
+      "capability_profiles": ["production", "capability_matched"],
+      "condition_source": "run-manifest",
+    },
     "arms": ["shell_tool", "mbtx_program"],
     "seed": 20260919,
     "repeats": 2,
@@ -145,6 +154,7 @@ fn v4_task(
   object["complexity"] = tier
   object["variant"] = (0).to_json()
   object["cohort"] = (if delivery { "program-delivery" } else { "workflow" }).to_json()
+  object["process_policy_profile"] = "v4-direct-process-v1".to_json()
   object["acceptance"] = (if delivery { "programs" } else { "workflow" }).to_json()
   object["required_source"] = if delivery {
     { "shell_tool": "solution.sh", "mbtx_program": "solution.mbtx" }

@@ -11,7 +11,7 @@ async fn main {
   let args = @env.args()
   guard args.length() >= 2 && ["replay", "relay"].contains(args[1]) else {
     fail(
-      "Usage: moon run mbtx/scripts/collect-study.mbtx replay|relay [--suite basic|complexity|all] [mbtx-eval run options]",
+      "Usage: moon run mbtx/scripts/collect-study.mbtx replay|relay [--suite natural|basic|complexity|all] [mbtx-eval run options]",
     )
   }
   let bundle = match @env.get_env_var("MBTX_BUNDLE") {

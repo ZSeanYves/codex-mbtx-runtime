@@ -41,6 +41,13 @@ fn long_oracle(task : Json, snapshot : Json) -> Json raise {
       _ => Json::null()
     }
     if actual != expected {
+      if !(expected is String(_)) {
+        return artifact_mismatch(
+          path,
+          expected,
+          field(field(snapshot, "files"), path),
+        )
+      }
       return {
         "success": false,
         "reason": ("Missing or incorrect required artifact: " + path).to_json(),

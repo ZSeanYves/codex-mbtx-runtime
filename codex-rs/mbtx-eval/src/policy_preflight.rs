@@ -40,11 +40,26 @@ pub(crate) async fn check(execution: &crate::attempt::Execution<'_>) -> Result<(
     };
     let result =
         async {
-            let mut allow = vec![
-                json!({"program":"jq","args_prefix":[]}),
-                json!({"program":"rg","args_prefix":["--no-config","--json","--"]}),
-                json!({"program":"rg","args_prefix":["--no-config","--files","--"]}),
-            ];
+            let task = execution.manifest["protocol"]["tasks"]
+                .as_array()
+                .and_then(|tasks| tasks.first())
+                .context("policy preflight task")?;
+            let natural = execution.manifest["protocol"]["suite"] == "natural";
+            if let Some(profile) = task["process_policy_profile"].as_str() {
+                ensure!(
+                    profile
+                        == if natural {
+                            "natural-direct-process-v1"
+                        } else {
+                            "v4-direct-process-v1"
+                        },
+                    "policy profile does not match protocol"
+                );
+            }
+            let mut allow = task["process_allow"]
+                .as_array()
+                .context("policy preflight process allow")?
+                .clone();
             for action in [
                 "square",
                 "checked-square",
@@ -54,10 +69,21 @@ pub(crate) async fn check(execution: &crate::attempt::Execution<'_>) -> Result<(
                 "emit",
                 "hash",
             ] {
-                allow.push(json!({"program":"fixture-worker","args_prefix":[action]}));
+                let rule = json!({"program":"fixture-worker","args_prefix":[action]});
+                if !allow.iter().any(|existing| existing == &rule) {
+                    allow.push(rule);
+                }
             }
+            // Keep this count beside the fixture's exact denied request list.
+            // It is recorded below so a changed preflight fixture cannot be
+            // mistaken for a successful policy check.
+            let expected_denials = if natural { 12 } else { 13 };
             let policy = crate::process_policy::prepare(
-                &json!({"process_allow":allow}),
+                &json!({
+                    "process_allow":allow,
+                    "process_policy_profile":task["process_policy_profile"],
+                    "cohort":task["cohort"]
+                }),
                 &work,
                 &evidence,
                 execution.bundle,
@@ -129,6 +155,11 @@ pub(crate) async fn check(execution: &crate::attempt::Execution<'_>) -> Result<(
                 .arg(work.join(
                     "workspace/build/policy-check.mbtx/wasm/release/build/single/single.wasm",
                 ))
+                .args(if natural {
+                    vec!["--natural"]
+                } else {
+                    Vec::new()
+                })
                 .current_dir(work.join("workspace"))
                 .env_clear()
                 .env("CODEX_HOME", work.join("codex-home"))
@@ -156,8 +187,8 @@ pub(crate) async fn check(execution: &crate::attempt::Execution<'_>) -> Result<(
                     .lines()
                     .filter(|line| *line == "Sandbox policy blocked process spawn")
                     .count()
-                    == 13,
-                "expected 13 native direct-spawn rejection diagnostics"
+                    == expected_denials,
+                "unexpected native direct-spawn rejection diagnostics"
             );
             Ok::<_, anyhow::Error>(())
         }
@@ -178,7 +209,7 @@ pub(crate) async fn check(execution: &crate::attempt::Execution<'_>) -> Result<(
     });
     crate::evidence::json_new(
         &evidence.join("result.json"),
-        &json!({"status":if result.is_ok(){"success"}else{"local_preflight_failure"},"error":result.as_ref().err().map(ToString::to_string),"scope":"upstream direct-spawn admission and worker IPC before any relay request; descendant confinement not claimed","expected_denial_diagnostics":13}),
+        &json!({"status":if result.is_ok(){"success"}else{"local_preflight_failure"},"error":result.as_ref().err().map(ToString::to_string),"scope":"upstream direct-spawn admission and worker IPC before any relay request; descendant confinement not claimed","expected_denial_diagnostics":if execution.manifest["protocol"]["suite"] == "natural" {12} else {13}}),
     )?;
     crate::evidence::seal(&evidence)?;
     result.with_context(|| {

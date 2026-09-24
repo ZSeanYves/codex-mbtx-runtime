@@ -127,7 +127,11 @@ fn repeat_comparisons(
       continue
     }
     for arm in ["shell_tool", "mbtx_program"] {
-      let repetitions = assigned.map(p => {
+      let arm_pairs = assigned.filter(p => report_assigned_arms(p).contains(arm))
+      if arm_pairs.length() < 2 {
+        continue
+      }
+      let repetitions = arm_pairs.map(p => {
         let attempt = attempts
           .iter()
           .find_first(a => {

@@ -38,8 +38,14 @@ pub(crate) struct RunArgs {
     pub output: PathBuf,
     #[arg(long, value_parser=["replay","relay"],default_value="replay")]
     pub mode: String,
-    #[arg(long,value_parser=["basic","complexity","all"],default_value="all")]
+    #[arg(long,value_parser=["basic","complexity","all","natural"],default_value="all")]
     pub suite: String,
+    /// Frozen execution mode selected by the condition manifest.
+    #[arg(long, value_parser=["direct", "code_mode"], default_value="code_mode")]
+    pub execution_mode: String,
+    /// Capability boundary for this collection condition.
+    #[arg(long, value_parser=["production", "capability_matched"], default_value="production")]
+    pub capability_profile: String,
     #[arg(long, default_value = "mbtx/config/relay.toml")]
     pub config: PathBuf,
     #[arg(long)]
@@ -83,17 +89,24 @@ pub(crate) struct RunArgs {
     pub observation: String,
 }
 
-fn route(directory: PathBuf, arm: &str, replies: Option<Vec<replay::Reply>>) -> Result<Route> {
+fn route(
+    directory: PathBuf,
+    arm: &str,
+    execution_mode: &str,
+    replies: Option<Vec<replay::Reply>>,
+) -> Result<Route> {
     for child in ["http", "otel", "trace"] {
         fs::create_dir(directory.join(child))?;
     }
     Ok(Route {
         directory,
         arm: arm.into(),
+        execution_mode: execution_mode.into(),
         token: uuid::Uuid::new_v4().to_string(),
         replies,
         active: AtomicBool::new(true),
         requests: AtomicUsize::new(0),
+        replay_cursor: AtomicUsize::new(0),
         otel_requests: AtomicUsize::new(0),
         observation_failures: AtomicUsize::new(0),
         closed: tokio::sync::Notify::new(),
@@ -160,6 +173,72 @@ fn selected_arm_count(manifest: &Value, pairs: &[Value]) -> usize {
         .count()
 }
 
+fn validate_condition_scope(bundle: &Path, bundle_info: &Value, scope: &Value) -> Result<()> {
+    let execution_mode = scope["execution_mode"]
+        .as_str()
+        .context("condition execution mode")?;
+    let profile = scope["capability_profile"]
+        .as_str()
+        .context("condition capability profile")?;
+    ensure!(
+        matches!(execution_mode, "direct" | "code_mode"),
+        "unsupported condition execution mode {execution_mode}"
+    );
+    ensure!(
+        matches!(profile, "production" | "capability_matched"),
+        "unsupported capability profile {profile}"
+    );
+    let ids = scope["condition_ids"].as_array().context("condition IDs")?;
+    ensure!(
+        ids.len() == 2,
+        "condition scope must contain shell and MBTX entries"
+    );
+    let all = bundle_info["conditions"]["conditions"]
+        .as_array()
+        .context("bundle condition manifest")?;
+    for backend in ["shell", "mbtx"] {
+        let id = format!(
+            "{}-{backend}-{}",
+            execution_mode.replace('_', "-"),
+            profile.replace('_', "-")
+        );
+        ensure!(
+            ids.iter().any(|value| value.as_str() == Some(id.as_str())),
+            "condition scope omits {id}"
+        );
+        let condition = all
+            .iter()
+            .find(|condition| condition["condition_id"] == id)
+            .with_context(|| format!("condition {id} is absent from bundle"))?;
+        ensure!(
+            condition["requested_tool_mode"] == condition["effective_tool_mode"],
+            "requested/effective tool mode mismatch for {id}"
+        );
+        ensure!(
+            condition["policy_sha256"] == bundle_info["files"]["process-policy.mbtx"],
+            "policy hash mismatch for {id}"
+        );
+        let expected_backend = if backend == "mbtx" {
+            condition["expected_nested_tools"] == json!(["mbtx"])
+                || condition["expected_direct_tools"] == json!(["mbtx"])
+        } else {
+            condition["expected_nested_tools"] == json!(["exec_command", "write_stdin"])
+                || condition["expected_direct_tools"] == json!(["exec_command", "write_stdin"])
+        };
+        ensure!(
+            expected_backend,
+            "condition tool contract mismatch for {id}"
+        );
+    }
+    if execution_mode == "code_mode" {
+        ensure!(
+            bundle.join("codex-code-mode-host").is_file(),
+            "Code Mode host is unavailable; refusing to fall back to Direct"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
     ensure!(
         cfg!(unix),
@@ -192,13 +271,61 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
     );
     let bundle = args.bundle.canonicalize()?;
     let bundle_info = bundle::verify(&bundle)?;
+    let all_conditions = bundle_info["conditions"]["conditions"]
+        .as_array()
+        .context("bundle condition manifest")?;
+    let matching_conditions = all_conditions
+        .iter()
+        .filter(|condition| {
+            condition["execution_mode"] == args.execution_mode
+                && condition["capability_profile"] == args.capability_profile
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        matching_conditions.len() == 2,
+        "condition manifest must contain one shell and one MBTX condition for the selected mode/profile"
+    );
+    let condition_scope = json!({
+        "execution_mode": args.execution_mode,
+        "capability_profile": args.capability_profile,
+        "condition_ids": matching_conditions
+            .iter()
+            .filter_map(|condition| condition["condition_id"].as_str())
+            .collect::<Vec<_>>(),
+        "capability_matching": if args.capability_profile == "capability_matched" {
+            json!({"shell": "unverified", "mbtx": "policy_admitted"})
+        } else {
+            json!({"shell": "normal_shell", "mbtx": "restricted_process_policy"})
+        },
+    });
+    validate_condition_scope(&bundle, &bundle_info, &condition_scope)?;
     let path = std::env::var("PATH").context("PATH is required")?;
+    let natural_suite = args.suite == "natural";
     let mut utilities = serde_json::Map::new();
-    for name in ["rg", "jq", "sh", "git"] {
-        let executable = which::which(name).with_context(|| format!("required utility {name} is missing; install ripgrep, jq and git before collection"))?.canonicalize()?;
+    let utility_names = if natural_suite {
+        vec!["rg", "jq", "sh", "git", "python3", "node"]
+    } else {
+        vec!["rg", "jq", "sh", "git"]
+    };
+    for name in utility_names {
+        let executable = which::which(name)
+            .with_context(|| format!("required utility {name} is missing; install the frozen study utilities before collection"))?
+            .canonicalize()?;
         utilities.insert(
             name.into(),
             json!({"path":executable,"sha256":crate::evidence::digest(&fs::read(&executable)?)}),
+        );
+    }
+    if natural_suite {
+        // MoonBit is selected from the verified bundle rather than from the
+        // caller's ambient PATH. It is available to the MBTX policy only when
+        // a task explicitly admits it.
+        let moon = bundle_info["moon_path"]
+            .as_str()
+            .context("bundle moon path")?;
+        utilities.insert(
+            "moon".into(),
+            json!({"path":moon,"sha256":crate::evidence::digest(&fs::read(moon)?)}),
         );
     }
     let config = RelayConfig::load(&args.config)?;
@@ -251,6 +378,13 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
         .await?;
     for task in protocol["tasks"].as_array().context("protocol tasks")? {
         crate::process_policy::rules(task)?;
+        let contract = analysis.query(json!({"op":"contract","task":task})).await?;
+        ensure!(
+            contract["status"] != "invalid",
+            "task contract preflight failed for {}: {}",
+            task["id"],
+            contract["errors"]
+        );
     }
     let repeats = args.repeats.unwrap_or(
         protocol["repeats"]
@@ -337,6 +471,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
                     .get("schedule_selection")
                     .is_none_or(|selection| selection == &schedule_selection)
                 && previous["protocol"] == protocol
+                && previous["condition"] == condition_scope
                 && previous["path"] == path
                 && previous["utilities"] == json!(utilities)
                 && previous["replay_fault"] == json!(args.replay_fault)
@@ -368,7 +503,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<PathBuf> {
             seal(&directory)?;
         }
         let fixture_seals = crate::evidence::hashes(&args.output.join("fixtures"))?;
-        let manifest = json!({"schema_version":1,"run_id":uuid::Uuid::new_v4().to_string(),"created_ms":now_ms(),"mode":args.mode,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,"bundle":bundle_info,"protocol":protocol,"schedule":expected_schedule,"config":config,"min_interval_ms":args.min_interval_ms,"seed":args.seed,"path":std::env::var("PATH").unwrap_or_default(),"replay_source":args.replay_source,"replay_fault":args.replay_fault,"fixture_hashes":fixture_seals});
+        let manifest = json!({"schema_version":1,"run_id":uuid::Uuid::new_v4().to_string(),"created_ms":now_ms(),"mode":args.mode,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,"bundle":bundle_info,"condition":condition_scope,"protocol":protocol,"schedule":expected_schedule,"config":config,"min_interval_ms":args.min_interval_ms,"seed":args.seed,"path":std::env::var("PATH").unwrap_or_default(),"replay_source":args.replay_source,"replay_fault":args.replay_fault,"fixture_hashes":fixture_seals});
         let mut manifest = manifest;
         manifest["schedule_selection"] = schedule_selection;
         manifest["path"] = json!(path);
@@ -449,7 +584,9 @@ async fn collect_schedule(
         },
     )
     .await?;
-    if manifest["protocol"]["protocol_id"] == "programmable-shell-replacement-v4" {
+    if manifest["protocol"]["protocol_id"] == "programmable-shell-replacement-v4"
+        || manifest["protocol"]["suite"] == "natural"
+    {
         crate::policy_preflight::check(execution).await?;
     }
     if args.mode == "relay" && !args.resume && !probe(root, config, gate).await? {
@@ -497,12 +634,40 @@ async fn collect_schedule(
                 return Ok("infrastructure_failure_gate");
             }
             let arm = arm.as_str().context("arm label")?;
+            let execution_mode = manifest["condition"]["execution_mode"]
+                .as_str()
+                .context("execution mode")?;
+            let backend = if arm == "mbtx_program" {
+                "mbtx"
+            } else {
+                "shell"
+            };
+            let condition_id = format!(
+                "{}-{}-{}",
+                manifest["condition"]["execution_mode"]
+                    .as_str()
+                    .context("execution mode")?
+                    .replace('_', "-"),
+                backend,
+                manifest["condition"]["capability_profile"]
+                    .as_str()
+                    .context("capability profile")?
+                    .replace('_', "-")
+            );
+            ensure!(
+                manifest["condition"]["condition_ids"]
+                    .as_array()
+                    .is_some_and(|ids| ids
+                        .iter()
+                        .any(|id| id.as_str() == Some(condition_id.as_str()))),
+                "assigned condition is absent from the run scope: {condition_id}"
+            );
             let id = uuid::Uuid::new_v4().to_string();
             let directory = root.join("attempts").join(&id);
             fs::create_dir(&directory)?;
             json_new(
                 &directory.join("assignment.json"),
-                &json!({"attempt_id":id,"pair_id":pair["pair_id"],"task_id":task["id"],"arm":arm,"repeat":pair["repeat"],"assigned_ms":now_ms()}),
+                &json!({"attempt_id":id,"pair_id":pair["pair_id"],"task_id":task["id"],"arm":arm,"repeat":pair["repeat"],"condition_id":condition_id,"assigned_ms":now_ms()}),
             )?;
             eprintln!(
                 "[eval] {}/{} arms; {} {arm} {}; repeat {}",
@@ -523,7 +688,12 @@ async fn collect_schedule(
                 let provider = config.provider()?;
                 let replies = if let Some(transient) = fault.strip_suffix("-once") {
                     let mut replies = vec![replay::fault(transient)];
-                    replies.extend(replay::fixed(task, arm, 0)?);
+                    replies.extend(replay::fixed(
+                        task,
+                        arm,
+                        execution_mode,
+                        /*prefix_turns*/ 0,
+                    )?);
                     replies
                 } else {
                     // Enough evidence for both independently bounded native
@@ -534,12 +704,20 @@ async fn collect_schedule(
                 };
                 Some(replies)
             } else if args.mode == "replay" {
-                Some(replay::fixed(task, arm, args.replay_prefix_turns)?)
+                Some(replay::fixed(
+                    task,
+                    arm,
+                    execution_mode,
+                    args.replay_prefix_turns,
+                )?)
             } else {
                 None
             };
             let route = gate
-                .add(id.clone(), route(directory.clone(), arm, replies)?)
+                .add(
+                    id.clone(),
+                    route(directory.clone(), arm, execution_mode, replies)?,
+                )
                 .await;
             if let Err(error) = execution.execute(task, &pair["pair_id"], &id, &route).await {
                 if !directory.join("seal.json").exists() {
@@ -585,7 +763,10 @@ async fn probe(root: &Path, config: &RelayConfig, gate: &Arc<Gate>) -> Result<bo
         let directory = root.join("probes").join(&id);
         fs::create_dir(&directory)?;
         let route = gate
-            .add(id.clone(), route(directory.clone(), "probe", None)?)
+            .add(
+                id.clone(),
+                route(directory.clone(), "probe", "direct", /*replies*/ None)?,
+            )
             .await;
         let response = client
             .post(format!("{}/a/{id}/v1/responses", gate.endpoint))

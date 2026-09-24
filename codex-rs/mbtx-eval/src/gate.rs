@@ -44,10 +44,12 @@ mod tests;
 pub(crate) struct Route {
     pub directory: PathBuf,
     pub arm: String,
+    pub execution_mode: String,
     pub token: String,
     pub replies: Option<Vec<Reply>>,
     pub active: AtomicBool,
     pub requests: AtomicUsize,
+    pub replay_cursor: AtomicUsize,
     pub otel_requests: AtomicUsize,
     pub observation_failures: AtomicUsize,
     pub closed: Notify,
@@ -286,7 +288,22 @@ async fn exchange(
     write_new(&directory.join("request.json"), &bytes)?;
     // Preserve rejected requests too; they are harness evidence, never relay failures.
     if path == "responses" {
-        crate::request_contract::validate(&body, &route.arm)?;
+        let contract = route.directory.join("task-contract.json");
+        if contract.exists() {
+            crate::task_contract::validate(&body, &crate::evidence::read_json(&contract)?)?;
+        }
+        crate::request_contract::validate(&body, &route.arm, &route.execution_mode)?;
+        if route
+            .replies
+            .as_ref()
+            .is_some_and(|replies| replies.iter().any(|reply| reply.wait_for_code_cells))
+        {
+            crate::request_contract::validate_replay_history(
+                &body,
+                &route.arm,
+                &route.execution_mode,
+            )?;
+        }
     }
     let queued = gate.epoch.elapsed().as_nanos() as u64;
     let mut permit = gate.rate.clone().lock_owned().await;
@@ -307,12 +324,20 @@ async fn exchange(
         &json!({"request_id":format!("{id}:{ordinal}"),"route":path,"queued_ns":queued,"slot_acquired_ns":sent,"queue_wait_ns":sent-queued,"request_evidence_write_ns":queued-preparing,"clock_domain":gate.clock_domain,"wall_time_ms":now_ms()}),
     )?;
     let reply = if let Some(replies) = &route.replies {
-        Some(
-            replies
-                .get(ordinal)
-                .cloned()
-                .context("recorded responses exhausted")?,
-        )
+        let next = replies
+            .get(route.replay_cursor.load(Ordering::SeqCst))
+            .context("recorded responses exhausted")?;
+        if let Some(wait) = next
+            .wait_for_code_cells
+            .then(|| crate::replay::pending_wait(&body, ordinal))
+            .transpose()?
+            .flatten()
+        {
+            Some(wait)
+        } else {
+            route.replay_cursor.fetch_add(1, Ordering::SeqCst);
+            Some(next.clone())
+        }
     } else {
         None
     };
